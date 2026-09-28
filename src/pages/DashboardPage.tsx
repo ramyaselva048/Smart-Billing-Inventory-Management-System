@@ -56,8 +56,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
         api.settings.get(),
       ]);
       setStats(s);
-      setSalesChart(chart);
-      setRecentInvoices(rec);
+      setSalesChart(Array.isArray(chart) ? chart : []);
+      setRecentInvoices(Array.isArray(rec) ? rec : []);
       setSettings(st);
     } catch (err) {
       console.error('Error loading dashboard:', err);

@@ -13,11 +13,12 @@ import {
   KeyRound,
   LogOut,
   Receipt,
-  Lock
+  Lock,
+  Database
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { Invoice } from '../../types';
-import { api } from '../../services/api';
+import { api, DatabaseStatus } from '../../services/api';
 import { formatCurrency, formatDate } from '../../utils/formatters';
 import { TabType } from './Sidebar';
 import { ProfileModal } from '../profile/ProfileModal';
@@ -67,6 +68,22 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   // Live Clock
   const [timeStr, setTimeStr] = useState('');
+  const [dbStatus, setDbStatus] = useState<DatabaseStatus | null>(null);
+
+  useEffect(() => {
+    const checkDb = async () => {
+      try {
+        const st = await api.database.getStatus();
+        setDbStatus(st);
+      } catch (e) {
+        // silent
+      }
+    };
+    checkDb();
+    const dbInterval = setInterval(checkDb, 30000);
+    return () => clearInterval(dbInterval);
+  }, []);
+
   useEffect(() => {
     const updateTime = () => {
       const now = new Date();
@@ -267,6 +284,30 @@ export const Navbar: React.FC<NavbarProps> = ({
           <Plus className="w-4 h-4 stroke-[2.5]" />
           <span className="hidden sm:inline">New Bill</span>
         </button>
+
+        {/* Database Status Indicator */}
+        {dbStatus && (
+          <div
+            className={`hidden md:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold transition-all ${
+              dbStatus.connected
+                ? 'bg-emerald-50 text-emerald-700 border-emerald-200/80'
+                : 'bg-amber-50 text-amber-700 border-amber-200/80'
+            }`}
+            title={
+              dbStatus.connected
+                ? `TiDB Cloud MySQL Connected (${dbStatus.pingMs}ms latency)\nDatabase: ${dbStatus.database || 'smartbill'}\nHost: ${dbStatus.host}`
+                : `Database Offline / Using Local Storage Cache`
+            }
+          >
+            <Database className="w-3.5 h-3.5 shrink-0 opacity-80" />
+            <span
+              className={`w-2 h-2 rounded-full ${
+                dbStatus.connected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'
+              }`}
+            />
+            <span>{dbStatus.connected ? 'TiDB Cloud' : 'Local Mode'}</span>
+          </div>
+        )}
 
         {/* Live Clock */}
         <div className="hidden lg:flex items-center gap-1.5 text-xs text-slate-500 bg-slate-100 px-2.5 py-1.5 rounded-lg">

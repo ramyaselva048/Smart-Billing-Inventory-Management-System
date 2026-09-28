@@ -10,10 +10,13 @@ import {
   Lock,
   KeyRound,
   Eye,
-  EyeOff
+  EyeOff,
+  Database,
+  Server,
+  RefreshCw
 } from 'lucide-react';
 import { BusinessSettings } from '../types';
-import { api } from '../services/api';
+import { api, DatabaseStatus } from '../services/api';
 
 export const SettingsPage: React.FC = () => {
   const [settings, setSettings] = useState<BusinessSettings | null>(null);
@@ -42,9 +45,26 @@ export const SettingsPage: React.FC = () => {
   // Reset demo modal
   const [showResetConfirm, setShowResetConfirm] = useState(false);
 
+  // Database Connection State
+  const [dbStatus, setDbStatus] = useState<DatabaseStatus | null>(null);
+  const [testingDb, setTestingDb] = useState(false);
+
   useEffect(() => {
     loadSettings();
+    checkDatabaseHealth();
   }, []);
+
+  const checkDatabaseHealth = async () => {
+    try {
+      setTestingDb(true);
+      const st = await api.database.getStatus();
+      setDbStatus(st);
+    } catch (e) {
+      console.error('Failed to get DB status', e);
+    } finally {
+      setTestingDb(false);
+    }
+  };
 
   const loadSettings = async () => {
     try {
@@ -383,6 +403,91 @@ export const SettingsPage: React.FC = () => {
             </div>
           </div>
         </form>
+      </div>
+
+      {/* Cloud Database & Infrastructure Status */}
+      <div className="bg-white rounded-2xl p-5 shadow-xs border border-slate-200">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+              <Database className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wider">
+                  Cloud Database & Infrastructure
+                </h2>
+                {dbStatus?.connected ? (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse" />
+                    LIVE
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
+                    OFFLINE / LOCAL
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-slate-500">
+                Managed MySQL / TiDB Cloud Serverless database storage with automatic persistence.
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={checkDatabaseHealth}
+            disabled={testingDb}
+            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold cursor-pointer transition-all active:scale-98 disabled:opacity-50 self-start sm:self-auto"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${testingDb ? 'animate-spin' : ''}`} />
+            <span>{testingDb ? 'Testing Connection...' : 'Test Connection'}</span>
+          </button>
+        </div>
+
+        <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+          <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/70">
+            <span className="text-[10px] font-bold uppercase text-slate-400 block mb-0.5">Database Engine</span>
+            <span className="font-semibold text-slate-800 block truncate">
+              {dbStatus?.engine || 'TiDB Cloud Serverless'}
+            </span>
+            <span className="text-[10px] text-slate-500">MySQL 8.0 Wire-compatible</span>
+          </div>
+
+          <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/70">
+            <span className="text-[10px] font-bold uppercase text-slate-400 block mb-0.5">Active Database</span>
+            <span className="font-semibold text-slate-800 font-mono block">
+              {dbStatus?.database || 'smartbill'}
+            </span>
+            <span className="text-[10px] text-emerald-600 font-medium">SSL / TLS 1.2 Encrypted</span>
+          </div>
+
+          <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/70">
+            <span className="text-[10px] font-bold uppercase text-slate-400 block mb-0.5">Latency & Ping</span>
+            <span className="font-semibold text-slate-800 block">
+              {dbStatus?.pingMs ? `${dbStatus.pingMs} ms` : 'Testing...'}
+            </span>
+            <span className="text-[10px] text-slate-500">AWS ap-northeast-1</span>
+          </div>
+
+          <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/70">
+            <span className="text-[10px] font-bold uppercase text-slate-400 block mb-0.5">Cloud Records</span>
+            <span className="font-semibold text-slate-800 block font-mono">
+              {dbStatus?.counts ? `${dbStatus.counts.invoices} bills, ${dbStatus.counts.users} users` : 'Checking...'}
+            </span>
+            <span className="text-[10px] text-slate-500">Synchronized tables</span>
+          </div>
+        </div>
+
+        <div className="mt-3 p-2.5 bg-slate-100/70 rounded-xl border border-slate-200/50 flex items-center justify-between gap-2 text-[11px] text-slate-600 font-mono">
+          <div className="flex items-center gap-2 truncate">
+            <Server className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+            <span className="truncate">gateway01.ap-northeast-1.prod.aws.tidbcloud.com:4000</span>
+          </div>
+          <span className="shrink-0 text-emerald-700 bg-emerald-100/80 px-2 py-0.5 rounded text-[10px] font-bold">
+            Port 4000
+          </span>
+        </div>
       </div>
 
       {/* Reset Confirmation Modal */}

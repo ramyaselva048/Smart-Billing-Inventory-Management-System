@@ -80,9 +80,9 @@ export const ReportsPage: React.FC = () => {
       ]);
 
       setMetrics(sum);
-      setDailySalesChart(daily);
-      setMonthlySalesChart(monthly);
-      setPaymentSummary(payment);
+      setDailySalesChart(Array.isArray(daily) ? daily : []);
+      setMonthlySalesChart(Array.isArray(monthly) ? monthly : []);
+      setPaymentSummary(Array.isArray(payment) ? payment : []);
     } catch (err) {
       console.error('Error loading reports:', err);
     } finally {
@@ -492,7 +492,7 @@ export const ReportsPage: React.FC = () => {
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
-                  data={paymentSummary}
+                  data={Array.isArray(paymentSummary) ? paymentSummary : []}
                   dataKey="total"
                   nameKey="method"
                   cx="50%"
@@ -501,7 +501,7 @@ export const ReportsPage: React.FC = () => {
                   innerRadius={40}
                   paddingAngle={5}
                 >
-                  {paymentSummary.map((entry, index) => (
+                  {(Array.isArray(paymentSummary) ? paymentSummary : []).map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                   ))}
                 </Pie>
