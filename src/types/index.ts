@@ -61,6 +61,21 @@ export interface BusinessSettings {
 export interface DashboardStats {
   todaySales: number;
   todayBills: number;
+  weeklySales?: number;
+  monthlySales?: number;
+  yearlySales?: number;
   totalSales: number;
   totalBills: number;
+}
+
+export type DateFilterRange = 'all' | 'today' | 'week' | 'month' | 'year' | 'custom';
+
+export interface ReportsSummary {
+  todaySales: number;
+  weeklySales: number;
+  monthlySales: number;
+  yearlySales: number;
+  totalBills: number;
+  totalRevenue: number;
+  filteredInvoices: Invoice[];
 }

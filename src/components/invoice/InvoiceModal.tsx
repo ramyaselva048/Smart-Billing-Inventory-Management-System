@@ -40,10 +40,10 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
   const [isExportingPDF, setIsExportingPDF] = useState(false);
   const [exportSuccess, setExportSuccess] = useState(false);
   const [isPrinting, setIsPrinting] = useState(false);
-  const [printFeedback, setPrintFeedback] = useState<string | null>(null);
+  const [popupBlocked, setPopupBlocked] = useState(false);
   const [copiedSummary, setCopiedSummary] = useState(false);
 
-  // Auto trigger print when requested (e.g. from Print Bill button on billing page)
+  // Auto trigger print when requested (e.g. from Print Bill button on billing page or sales table)
   useEffect(() => {
     if (autoPrint && invoice) {
       handlePrint();
@@ -66,24 +66,20 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
     }
   };
 
-  // Handle Print (Direct clean print utility working on laptops & desktops)
+  // Handle Print: Native laptop printer dialog via printInvoiceDirect (no PDF download)
   const handlePrint = () => {
     setIsPrinting(true);
-    setPrintFeedback('Opening laptop printer dialog...');
+    setPopupBlocked(false);
     try {
       const res = printInvoiceDirect(invoice, settings);
-      if (res.method === 'pdf') {
-        setPrintFeedback('Direct print unavailable: Vector PDF downloaded & ready for print!');
-      } else {
-        setPrintFeedback('Printer dialog opened successfully!');
+      if (res.popupBlocked) {
+        setPopupBlocked(true);
       }
     } catch (err) {
-      console.error('Print failure, falling back to PDF:', err);
-      generateInvoicePDF(invoice, settings);
-      setPrintFeedback('Saved as PDF for direct printing.');
+      console.error('Print failure:', err);
+      window.print();
     } finally {
-      setTimeout(() => setIsPrinting(false), 600);
-      setTimeout(() => setPrintFeedback(null), 4000);
+      setTimeout(() => setIsPrinting(false), 400);
     }
   };
 
@@ -123,8 +119,8 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 z-50 overflow-y-auto animate-in fade-in duration-150">
-      <div className="bg-slate-900 rounded-2xl max-w-2xl w-full my-auto shadow-2xl border border-slate-700 overflow-hidden flex flex-col max-h-[96vh]">
+    <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 z-50 overflow-y-auto animate-in fade-in duration-150 print:static print:inset-auto print:bg-transparent print:p-0 print:m-0 print:overflow-visible print:block print:w-full print:h-auto">
+      <div className="bg-slate-900 rounded-2xl max-w-2xl w-full my-auto shadow-2xl border border-slate-700 overflow-hidden flex flex-col max-h-[96vh] print:bg-transparent print:border-none print:shadow-none print:rounded-none print:max-w-none print:w-full print:max-h-none print:overflow-visible print:block print:m-0 print:p-0">
         
         {/* ========================================================= */}
         {/* Top Control Bar with 3 IMPORTANT BUTTONS (Hidden when printing) */}
@@ -168,15 +164,15 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
             <button
               onClick={handlePrint}
               disabled={isPrinting}
-              className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all border border-slate-700 shadow-sm active:scale-95 cursor-pointer disabled:opacity-50"
-              title="Print Bill"
+              className="px-3.5 py-2 bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all shadow-md hover:shadow-cyan-600/20 active:scale-95 cursor-pointer disabled:opacity-50"
+              title="Open laptop printer dialog to print bill directly"
             >
               {isPrinting ? (
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
               ) : (
-                <Printer className="w-3.5 h-3.5 text-cyan-400" />
+                <Printer className="w-3.5 h-3.5" />
               )}
-              <span>Print Bill</span>
+              <span>{isPrinting ? 'Opening...' : 'Print Bill'}</span>
             </button>
 
             {/* New Bill */}
@@ -200,14 +196,19 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
           </div>
         </div>
 
-        {/* Status notification toast */}
-        {printFeedback && (
-          <div className="bg-cyan-500/20 border-b border-cyan-500/40 text-cyan-300 text-xs py-2 px-4 flex items-center justify-between print:hidden animate-in fade-in">
-            <span className="flex items-center gap-1.5">
-              <Printer className="w-4 h-4 text-cyan-400" />
-              <span>{printFeedback}</span>
+        {/* Browser popup blocked helper (shown ONLY if browser blocks window.open) */}
+        {popupBlocked && (
+          <div className="bg-amber-500/20 border-b border-amber-500/40 text-amber-200 text-xs py-2.5 px-4 flex items-center justify-between print:hidden gap-2">
+            <span className="flex items-center gap-2">
+              <Printer className="w-4 h-4 text-amber-400 shrink-0" />
+              <span>Browser blocked print popup. Click button to print directly:</span>
             </span>
-            <span className="text-[11px] text-cyan-400 font-mono">Invoice {invoice.invoiceNumber}</span>
+            <button
+              onClick={handlePrint}
+              className="px-3 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg text-xs cursor-pointer shrink-0 transition-colors"
+            >
+              Open Printer
+            </button>
           </div>
         )}
 
@@ -224,13 +225,13 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
         {/* ========================================================= */}
         {/* Scrollable Printable Bill Container */}
         {/* ========================================================= */}
-        <div className="flex-1 overflow-y-auto p-3 sm:p-6 bg-slate-900/60 print:bg-white print:p-0 custom-scrollbar">
+        <div className="flex-1 overflow-y-auto p-3 sm:p-6 bg-slate-900/60 print:bg-transparent print:p-0 print:m-0 print:overflow-visible print:block print:w-full custom-scrollbar">
           
           {/* Authentic Retail Shop Bill / Receipt */}
           <div
             ref={printRef}
             id="printable-invoice"
-            className="bg-white text-slate-900 rounded-xl max-w-[540px] mx-auto p-6 sm:p-8 shadow-xl print:shadow-none print:border-none print:max-w-none print:w-full font-mono text-xs border border-slate-200"
+            className="bg-white text-slate-900 rounded-xl max-w-[540px] mx-auto p-6 sm:p-8 shadow-xl print:shadow-none print:border print:border-slate-400 print:rounded-lg print:max-w-[520px] print:mx-auto print:p-6 print:w-full font-mono text-xs border border-slate-200"
           >
             {/* ------------------------------------------------ */}
             {/* SHOP HEADER (Centered) */}

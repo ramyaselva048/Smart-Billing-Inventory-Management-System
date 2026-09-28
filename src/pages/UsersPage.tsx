@@ -55,6 +55,7 @@ export const UsersPage: React.FC<UsersPageProps> = ({ initialSearch = '' }) => {
   // Delete Confirm
   const [deletingUser, setDeletingUser] = useState<User | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
 
   useEffect(() => {
     loadUsers();
@@ -241,6 +242,40 @@ export const UsersPage: React.FC<UsersPageProps> = ({ initialSearch = '' }) => {
     });
   }, [users, search, roleFilter]);
 
+  const selectableUsers = useMemo(() => {
+    return filteredUsers.filter(u => u.id !== currentUser?.id);
+  }, [filteredUsers, currentUser]);
+
+  const handleToggleSelectUser = (id: string) => {
+    setSelectedUserIds(prev => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]));
+  };
+
+  const handleSelectAllUsers = () => {
+    if (selectedUserIds.length === selectableUsers.length && selectableUsers.length > 0) {
+      setSelectedUserIds([]);
+    } else {
+      setSelectedUserIds(selectableUsers.map(u => u.id));
+    }
+  };
+
+  const handleDeleteSelectedUsers = async () => {
+    if (selectedUserIds.length === 0) return;
+    if (window.confirm(`Delete ${selectedUserIds.length} selected users? This action cannot be undone.`)) {
+      try {
+        setLoading(true);
+        for (const uid of selectedUserIds) {
+          await api.users.delete(uid);
+        }
+        setSelectedUserIds([]);
+        await loadUsers();
+      } catch (err: any) {
+        setDeleteError(err?.message || 'Failed to delete selected users');
+      } finally {
+        setLoading(false);
+      }
+    }
+  };
+
   const roleFilterOptions = [
     { value: 'all', label: 'All Roles' },
     { value: 'admin', label: 'Administrators' },
@@ -329,11 +364,36 @@ export const UsersPage: React.FC<UsersPageProps> = ({ initialSearch = '' }) => {
 
       {/* Users Table */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+        {selectedUserIds.length > 0 && (
+          <div className="p-3 bg-blue-50/80 border-b border-blue-100 flex items-center justify-between text-xs animate-in fade-in">
+            <span className="font-semibold text-blue-900">
+              {selectedUserIds.length} user{selectedUserIds.length === 1 ? '' : 's'} selected
+            </span>
+            <button
+              onClick={handleDeleteSelectedUsers}
+              className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-semibold text-xs flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Delete Selected ({selectedUserIds.length})</span>
+            </button>
+          </div>
+        )}
+
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead className="bg-slate-50 text-slate-600 font-semibold uppercase tracking-wider text-[10px]">
               <tr>
-                <th className="px-5 py-3">User</th>
+                <th className="w-10 px-3 py-3 text-center">
+                  <input
+                    type="checkbox"
+                    checked={selectedUserIds.length === selectableUsers.length && selectableUsers.length > 0}
+                    onChange={handleSelectAllUsers}
+                    title="Select All"
+                    aria-label="Select All"
+                    className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer align-middle"
+                  />
+                </th>
+                <th className="px-4 py-3">User</th>
                 <th className="px-4 py-3">Role</th>
                 <th className="px-4 py-3">Phone</th>
                 <th className="px-4 py-3">Status</th>
@@ -344,13 +404,13 @@ export const UsersPage: React.FC<UsersPageProps> = ({ initialSearch = '' }) => {
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan={6} className="px-5 py-12 text-center text-slate-400">
+                  <td colSpan={7} className="px-5 py-12 text-center text-slate-400">
                     Loading users...
                   </td>
                 </tr>
               ) : filteredUsers.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-5 py-12 text-center text-slate-400">
+                  <td colSpan={7} className="px-5 py-12 text-center text-slate-400">
                     No users found matching query.
                   </td>
                 </tr>
@@ -358,10 +418,26 @@ export const UsersPage: React.FC<UsersPageProps> = ({ initialSearch = '' }) => {
                 filteredUsers.map((u, idx) => {
                   const isCurrent = u.id === currentUser?.id;
                   const isAdminRole = u.role === 'admin';
+                  const isSelected = selectedUserIds.includes(u.id);
 
                   return (
-                    <tr key={`${u.id}-${idx}`} className="hover:bg-slate-50/70 transition-colors">
-                      <td className="px-5 py-3.5">
+                    <tr
+                      key={`${u.id}-${idx}`}
+                      className={`transition-colors ${
+                        isSelected ? 'bg-blue-50/60' : 'hover:bg-slate-50/70'
+                      }`}
+                    >
+                      <td className="w-10 px-3 py-3.5 text-center">
+                        <input
+                          type="checkbox"
+                          disabled={isCurrent}
+                          checked={isSelected}
+                          onChange={() => handleToggleSelectUser(u.id)}
+                          aria-label={`Select user ${u.name}`}
+                          className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer align-middle disabled:opacity-30 disabled:cursor-not-allowed"
+                        />
+                      </td>
+                      <td className="px-4 py-3.5">
                         <div className="flex items-center gap-3">
                           <img
                             src={u.avatar || 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=80&auto=format&fit=crop&q=80'}

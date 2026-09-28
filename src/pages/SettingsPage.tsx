@@ -9,7 +9,6 @@ import {
   Upload,
   Lock,
   KeyRound,
-  ShieldCheck,
   Eye,
   EyeOff
 } from 'lucide-react';
@@ -384,27 +383,6 @@ export const SettingsPage: React.FC = () => {
             </div>
           </div>
         </form>
-
-        {/* Current Credential Guide */}
-        <div className="p-3.5 bg-slate-50 border border-slate-200/80 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-          <div className="space-y-1">
-            <span className="font-bold text-slate-800 flex items-center gap-1.5">
-              <ShieldCheck className="w-4 h-4 text-emerald-600" />
-              Registered System Passwords
-            </span>
-            <p className="text-[11px] text-slate-500">
-              Only entering these exact passwords allows logging in to the application.
-            </p>
-          </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 font-mono text-[11px] text-slate-700">
-              Admin: <strong>admin123</strong>
-            </span>
-            <span className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 font-mono text-[11px] text-slate-700">
-              Staff: <strong>staff123</strong>
-            </span>
-          </div>
-        </div>
       </div>
 
       {/* Reset Confirmation Modal */}

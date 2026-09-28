@@ -2,7 +2,7 @@ import {
   User, Invoice, InvoiceItem, PaymentMethod, BusinessSettings, DashboardStats
 } from '../types';
 import {
-  INITIAL_USERS, INITIAL_INVOICES, INITIAL_SETTINGS
+  INITIAL_USERS, INITIAL_INVOICES, INITIAL_SETTINGS, createSampleInvoices
 } from '../data/initialData';
 
 const STORAGE_KEYS = {
@@ -114,7 +114,7 @@ export class SmartBillDatabase {
 
   public resetToFactory(): void {
     this.users = [...INITIAL_USERS];
-    this.invoices = [...INITIAL_INVOICES];
+    this.invoices = createSampleInvoices();
     this.settings = { ...INITIAL_SETTINGS };
     this.currentUser = null;
 
@@ -122,6 +122,12 @@ export class SmartBillDatabase {
     saveData(STORAGE_KEYS.INVOICES, this.invoices);
     saveData(STORAGE_KEYS.SETTINGS, this.settings);
     saveData(STORAGE_KEYS.CURRENT_USER, null);
+  }
+
+  public resetSalesData(): Invoice[] {
+    this.invoices = createSampleInvoices();
+    saveData(STORAGE_KEYS.INVOICES, this.invoices);
+    return [...this.invoices];
   }
 
   // --- Auth / User Session ---
@@ -392,6 +398,27 @@ export class SmartBillDatabase {
     return newInvoice;
   }
 
+  public deleteInvoice(id: string): boolean {
+    const prevLen = this.invoices.length;
+    this.invoices = this.invoices.filter(inv => inv.id !== id);
+    if (this.invoices.length !== prevLen) {
+      saveData(STORAGE_KEYS.INVOICES, this.invoices);
+      return true;
+    }
+    return false;
+  }
+
+  public deleteInvoices(ids: string[]): boolean {
+    const idSet = new Set(ids);
+    const prevLen = this.invoices.length;
+    this.invoices = this.invoices.filter(inv => !idSet.has(inv.id));
+    if (this.invoices.length !== prevLen) {
+      saveData(STORAGE_KEYS.INVOICES, this.invoices);
+      return true;
+    }
+    return false;
+  }
+
   // --- Settings ---
   public getSettings(): BusinessSettings {
     return { ...this.settings };
@@ -405,10 +432,19 @@ export class SmartBillDatabase {
 
   // --- Dashboard Statistics Calculation ---
   public getDashboardStats(): DashboardStats {
-    const today = new Date().toISOString().split('T')[0];
+    const now = new Date();
+    const today = now.toISOString().split('T')[0];
+    const currentYear = now.getFullYear();
+    const currentMonthPrefix = `${currentYear}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const currentYearPrefix = `${currentYear}-`;
+    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
     let totalSales = 0;
     let todaySales = 0;
     let todayBills = 0;
+    let weeklySales = 0;
+    let monthlySales = 0;
+    let yearlySales = 0;
 
     for (const inv of this.invoices) {
       totalSales += inv.grandTotal;
@@ -416,11 +452,23 @@ export class SmartBillDatabase {
         todaySales += inv.grandTotal;
         todayBills += 1;
       }
+      if (inv.date >= sevenDaysAgo && inv.date <= today) {
+        weeklySales += inv.grandTotal;
+      }
+      if (inv.date.startsWith(currentMonthPrefix)) {
+        monthlySales += inv.grandTotal;
+      }
+      if (inv.date.startsWith(currentYearPrefix)) {
+        yearlySales += inv.grandTotal;
+      }
     }
 
     return {
       todaySales: Number(todaySales.toFixed(2)),
       todayBills,
+      weeklySales: Number(weeklySales.toFixed(2)),
+      monthlySales: Number(monthlySales.toFixed(2)),
+      yearlySales: Number(yearlySales.toFixed(2)),
       totalSales: Number(totalSales.toFixed(2)),
       totalBills: this.invoices.length,
     };
@@ -452,33 +500,32 @@ export class SmartBillDatabase {
   }
 
   public getMonthlySalesChartData(): { month: string; sales: number; bills: number }[] {
-    const months = ['Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar'];
-    const map = new Map<string, { month: string; sales: number; bills: number }>();
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const now = new Date();
+    const result: { month: string; sales: number; bills: number }[] = [];
 
-    // Seed realistic baseline
-    const baseline = [
-      { month: 'Apr', sales: 42500, bills: 18 },
-      { month: 'May', sales: 58200, bills: 24 },
-      { month: 'Jun', sales: 51800, bills: 21 },
-      { month: 'Jul', sales: 67300, bills: 29 },
-      { month: 'Aug', sales: 74900, bills: 32 },
-      { month: 'Sep', sales: 38400, bills: 16 },
-    ];
+    // Last 12 months rolling or current calendar year
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const mName = monthNames[d.getMonth()];
+      const year = d.getFullYear();
+      const prefix = `${year}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 
-    baseline.forEach(b => map.set(b.month, { ...b }));
+      const monthInvoices = this.invoices.filter(inv => inv.date.startsWith(prefix));
+      const sales = monthInvoices.reduce((acc, inv) => acc + inv.grandTotal, 0);
 
-    // Add active invoices
-    for (const inv of this.invoices) {
-      const d = new Date(inv.date);
-      const m = d.toLocaleString('en-US', { month: 'short' });
-      if (map.has(m)) {
-        const item = map.get(m)!;
-        item.sales += inv.grandTotal;
-        item.bills += 1;
-      }
+      // Baseline demo revenue for past months if empty
+      const baselineSales = i > 0 && sales === 0 ? 12000 + ((d.getMonth() * 3700) % 25000) : sales;
+      const baselineBills = i > 0 && sales === 0 ? 6 + ((d.getMonth() * 2) % 10) : monthInvoices.length;
+
+      result.push({
+        month: `${mName}`,
+        sales: Number((sales > 0 ? sales : baselineSales).toFixed(2)),
+        bills: sales > 0 ? monthInvoices.length : baselineBills,
+      });
     }
 
-    return Array.from(map.values()).slice(0, 6);
+    return result;
   }
 
   public getPaymentMethodSummary(): {

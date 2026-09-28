@@ -1,4 +1,5 @@
 import jsPDF from 'jspdf';
+import { executeBrowserPrint } from './invoicePrint';
 
 export interface ReportSummaryCard {
   label: string;
@@ -32,7 +33,11 @@ export function exportToCSV(filename: string, headers: string[], rows: (string |
 }
 
 /**
- * Universal Print Report utility that works in any environment including sandboxed iFrames
+ * Universal Native Print Report utility using window.print()
+ * - Directly triggers laptop native printer dialog
+ * - Shows all connected printers, hides 100% of website UI
+ * - Renders crisp tables and summary metric cards with proper print CSS
+ * - Never downloads a PDF file on Print
  */
 export function printReport(
   title: string,
@@ -47,153 +52,100 @@ export function printReport(
   });
 
   const cardsHtml = summaryCards && summaryCards.length > 0 ? `
-    <div style="display: grid; grid-template-columns: repeat(${Math.min(summaryCards.length, 4)}, 1fr); gap: 12px; margin-bottom: 20px;">
+    <div style="display: grid; grid-template-columns: repeat(${Math.min(summaryCards.length, 5)}, 1fr); gap: 10px; margin-bottom: 16px;">
       ${summaryCards.map(c => `
-        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 14px;">
-          <div style="font-size: 11px; color: #64748b; text-transform: uppercase; font-weight: 600;">${c.label}</div>
-          <div style="font-size: 16px; color: #0f172a; font-weight: 800; margin-top: 4px;">${c.value}</div>
+        <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 8px 12px;">
+          <div style="font-size: 10px; color: #475569; text-transform: uppercase; font-weight: 700;">${escapeHtml(c.label)}</div>
+          <div style="font-size: 15px; color: #0f172a; font-weight: 800; margin-top: 2px;">${escapeHtml(String(c.value))}</div>
         </div>
       `).join('')}
     </div>
   ` : '';
 
   const tableRowsHtml = rows.map((r, i) => `
-    <tr style="background-color: ${i % 2 === 0 ? '#ffffff' : '#f8fafc'};">
+    <tr style="background-color: ${i % 2 === 0 ? '#ffffff' : '#f8fafc'}; page-break-inside: avoid; break-inside: avoid;">
       ${r.map(cell => `
-        <td style="padding: 8px 10px; border-bottom: 1px solid #e2e8f0; font-size: 11px; color: #1e293b;">
-          ${cell}
+        <td style="padding: 7px 9px; border: 1px solid #cbd5e1; font-size: 11px; color: #1e293b;">
+          ${escapeHtml(String(cell))}
         </td>
       `).join('')}
     </tr>
   `).join('');
 
-  const html = `
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <title>${title} - SMART BILL</title>
-        <style>
-          @page { size: A4 landscape; margin: 10mm; }
-          body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            margin: 0;
-            padding: 8mm;
-            color: #0f172a;
-            background: #ffffff;
-            -webkit-print-color-adjust: exact !important;
-            print-color-adjust: exact !important;
-          }
-          * { box-sizing: border-box; }
-          .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            border-bottom: 2px solid #2563eb;
-            padding-bottom: 12px;
-            margin-bottom: 16px;
-          }
-          .title { font-size: 18px; font-weight: 800; color: #0f172a; margin: 0; }
-          .subtitle { font-size: 11px; color: #64748b; margin-top: 3px; }
-          .meta { font-size: 11px; color: #64748b; text-align: right; }
-          table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 11px; }
-          th {
-            background-color: #f1f5f9;
-            color: #334155;
-            font-size: 10px;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            text-align: left;
-            padding: 8px 10px;
-            border-bottom: 2px solid #cbd5e1;
-          }
-          .footer {
-            margin-top: 24px;
-            padding-top: 10px;
-            border-top: 1px solid #e2e8f0;
-            font-size: 10px;
-            color: #94a3b8;
-            display: flex;
-            justify-content: space-between;
-          }
-        </style>
-      </head>
-      <body>
-        <div class="header">
-          <div>
-            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
-              <span style="background: #2563eb; color: #ffffff; padding: 2px 6px; border-radius: 4px; font-weight: 900; font-size: 11px;">SMART BILL</span>
-              <span style="font-size: 11px; color: #64748b; font-weight: 600;">Enterprise Management</span>
-            </div>
-            <h1 class="title">${title}</h1>
-            <div class="subtitle">${subtitle}</div>
-          </div>
-          <div class="meta">
-            <div><strong>Generated:</strong> ${now}</div>
-            <div><strong>Total Records:</strong> ${rows.length}</div>
-          </div>
-        </div>
-
-        ${cardsHtml}
-
-        <table>
-          <thead>
-            <tr>
-              ${headers.map(h => `<th>${h}</th>`).join('')}
-            </tr>
-          </thead>
-          <tbody>
-            ${tableRowsHtml}
-          </tbody>
-        </table>
-
-        <div class="footer">
-          <span>SMART BILL • Billing & Invoice Management System</span>
-          <span>Confidential Business Document</span>
-        </div>
-      </body>
-    </html>
-  `;
-
-  try {
-    const iframe = document.createElement('iframe');
-    iframe.style.position = 'fixed';
-    iframe.style.right = '0';
-    iframe.style.bottom = '0';
-    iframe.style.width = '0';
-    iframe.style.height = '0';
-    iframe.style.border = '0';
-    iframe.style.visibility = 'hidden';
-    document.body.appendChild(iframe);
-
-    const doc = iframe.contentWindow?.document || iframe.contentDocument;
-    if (doc) {
-      doc.open();
-      doc.write(html);
-      doc.close();
-
-      setTimeout(() => {
-        try {
-          iframe.contentWindow?.focus();
-          iframe.contentWindow?.print();
-        } catch (e) {
-          console.error('Iframe print error:', e);
-          window.print();
-        } finally {
-          setTimeout(() => {
-            if (document.body.contains(iframe)) {
-              document.body.removeChild(iframe);
-            }
-          }, 1500);
-        }
-      }, 350);
-    } else {
-      window.print();
+  const fullHtml = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeHtml(title)} - SMART BILL</title>
+  <style>
+    @page { size: A4 landscape; margin: 8mm 10mm; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      padding: 12px;
+      color: #0f172a;
+      background: #ffffff;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
     }
-  } catch (err) {
-    console.error('Print failure:', err);
-    window.print();
-  }
+    @media print {
+      body { padding: 4mm 6mm; }
+    }
+  </style>
+</head>
+<body>
+  <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #0f172a; background: #ffffff; padding: 4px;">
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #2563eb; padding-bottom: 12px; margin-bottom: 14px;">
+      <div>
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+          <span style="background: #2563eb; color: #ffffff; padding: 2px 7px; border-radius: 4px; font-weight: 900; font-size: 11px; letter-spacing: 0.5px;">SMART BILL</span>
+          <span style="font-size: 11px; color: #64748b; font-weight: 600;">Enterprise Billing & POS</span>
+        </div>
+        <h1 style="font-size: 19px; font-weight: 800; color: #0f172a; margin: 2px 0 0 0;">${escapeHtml(title)}</h1>
+        <div style="font-size: 11px; color: #64748b; margin-top: 3px;">${escapeHtml(subtitle)}</div>
+      </div>
+      <div style="font-size: 11px; color: #475569; text-align: right;">
+        <div><strong>Generated:</strong> ${escapeHtml(now)}</div>
+        <div><strong>Total Records:</strong> ${rows.length}</div>
+      </div>
+    </div>
+
+    ${cardsHtml}
+
+    <table style="width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 11px;">
+      <thead>
+        <tr style="page-break-inside: avoid; break-inside: avoid;">
+          ${headers.map(h => `
+            <th style="background-color: #f1f5f9; color: #1e293b; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; text-align: left; padding: 8px 9px; border: 1px solid #cbd5e1;">
+              ${escapeHtml(h)}
+            </th>
+          `).join('')}
+        </tr>
+      </thead>
+      <tbody>
+        ${tableRowsHtml}
+      </tbody>
+    </table>
+
+    <div style="margin-top: 20px; padding-top: 8px; border-top: 1px solid #cbd5e1; font-size: 10px; color: #64748b; display: flex; justify-content: space-between;">
+      <span>SMART BILL • Billing & Invoice Management System</span>
+      <span>Computer Generated Business Report</span>
+    </div>
+  </div>
+</body>
+</html>`;
+
+  executeBrowserPrint(fullHtml, title);
+}
+
+function escapeHtml(text: string): string {
+  if (!text) return '';
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
 }
 
 /**

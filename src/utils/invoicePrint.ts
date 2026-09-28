@@ -4,70 +4,136 @@ import {
   formatReceiptDateTime,
   numberToWordsINR
 } from './formatters';
-import { generateInvoicePDF } from './invoicePdf';
 
 /**
  * Direct Laptop & Desktop Invoice Print Utility
- * - Creates a clean, isolated print document inside a hidden full-size frame
- * - Renders the complete retail invoice with shop details, item table, and PAID badge
- * - Never gets wiped or destroyed early, ensuring Chrome/Edge print preview renders instantly
+ * - Triggers laptop's native printer dialog
+ * - Opens clean print window outside iframe sandbox so Chrome/Edge always shows printer dialog
+ * - Shows all connected printers (Thermal POS, USB, Wi-Fi, Office laser)
+ * - Renders complete retail tax invoice with shop details, item table, and PAID badge
+ * - Never downloads a PDF file on Print
  */
+export function executeBrowserPrint(
+  fullHtml: string,
+  title: string
+): { success: boolean; popupBlocked?: boolean } {
+  // Strategy 1: Dedicated clean print window
+  // Runs outside sandboxed iframes so window.print() is never blocked by allow-modals restriction
+  let printWin: Window | null = null;
+  try {
+    printWin = window.open(
+      '',
+      '_blank',
+      'width=800,height=900,menubar=no,toolbar=no,location=no,status=no,resizable=yes'
+    );
+  } catch (e) {
+    printWin = null;
+  }
+
+  if (printWin && !printWin.closed) {
+    try {
+      printWin.document.open();
+      // Auto-trigger print once content renders, then close window after print
+      const scriptToInject = `
+        <script>
+          function startPrint() {
+            window.focus();
+            window.print();
+          }
+          if (document.readyState === 'complete') {
+            setTimeout(startPrint, 150);
+          } else {
+            window.addEventListener('load', function() {
+              setTimeout(startPrint, 150);
+            });
+          }
+          window.addEventListener('afterprint', function() {
+            setTimeout(function() {
+              try { window.close(); } catch(e) {}
+            }, 300);
+          });
+        </script>
+      `;
+
+      const readyHtml = fullHtml.includes('</body>')
+        ? fullHtml.replace('</body>', `${scriptToInject}</body>`)
+        : `${fullHtml}${scriptToInject}`;
+
+      printWin.document.write(readyHtml);
+      printWin.document.close();
+      printWin.focus();
+
+      // Fallback timer trigger in case window.load did not fire
+      setTimeout(() => {
+        try {
+          if (printWin && !printWin.closed) {
+            printWin.focus();
+            printWin.print();
+          }
+        } catch (e) {}
+      }, 400);
+
+      return { success: true, popupBlocked: false };
+    } catch (err) {
+      console.warn('Writing to print window failed, trying fallback:', err);
+    }
+  }
+
+  // Strategy 2: In-document isolated hidden iframe
+  try {
+    let iframe = document.getElementById('smartbill-native-print-frame') as HTMLIFrameElement;
+    if (!iframe) {
+      iframe = document.createElement('iframe');
+      iframe.id = 'smartbill-native-print-frame';
+      iframe.style.position = 'fixed';
+      iframe.style.top = '-9999px';
+      iframe.style.left = '-9999px';
+      iframe.style.width = '1px';
+      iframe.style.height = '1px';
+      iframe.style.border = '0';
+      iframe.style.opacity = '0';
+      document.body.appendChild(iframe);
+    }
+
+    const doc = iframe.contentWindow?.document || iframe.contentDocument;
+    if (doc) {
+      doc.open();
+      doc.write(fullHtml);
+      doc.close();
+
+      setTimeout(() => {
+        try {
+          iframe.contentWindow?.focus();
+          iframe.contentWindow?.print();
+        } catch (iframeErr) {
+          console.warn('Iframe print failed, calling window.print():', iframeErr);
+          window.print();
+        }
+      }, 150);
+
+      return { success: true, popupBlocked: true };
+    }
+  } catch (err) {
+    console.warn('Hidden iframe print failed:', err);
+  }
+
+  // Strategy 3: Direct window.print()
+  try {
+    window.print();
+    return { success: true, popupBlocked: true };
+  } catch (err) {
+    console.error('All print methods failed:', err);
+    return { success: false, popupBlocked: true };
+  }
+}
+
 export function printInvoiceDirect(
   invoice: Invoice,
   settings: BusinessSettings
-): { success: boolean; method: 'direct' | 'pdf' } {
-  try {
-    let printFrame = document.getElementById('app-print-frame') as HTMLIFrameElement;
-    if (!printFrame) {
-      printFrame = document.createElement('iframe');
-      printFrame.id = 'app-print-frame';
-      printFrame.setAttribute('aria-hidden', 'true');
-      printFrame.style.position = 'fixed';
-      printFrame.style.top = '0';
-      printFrame.style.left = '0';
-      printFrame.style.width = '100%';
-      printFrame.style.height = '100%';
-      printFrame.style.border = '0';
-      printFrame.style.opacity = '0';
-      printFrame.style.pointerEvents = 'none';
-      printFrame.style.zIndex = '-9999';
-      document.body.appendChild(printFrame);
-    }
-
-    const doc = printFrame.contentWindow?.document || printFrame.contentDocument;
-    if (!doc || !printFrame.contentWindow) {
-      // Direct window print fallback
-      window.print();
-      return { success: true, method: 'direct' };
-    }
-
-    const html = generateCompletePrintDocument(invoice, settings);
-    doc.open();
-    doc.write(html);
-    doc.close();
-
-    // Trigger print dialog once the document is parsed & styles are active
-    setTimeout(() => {
-      try {
-        printFrame.contentWindow?.focus();
-        printFrame.contentWindow?.print();
-      } catch (err) {
-        console.warn('Iframe print blocked, falling back to window.print():', err);
-        window.print();
-      }
-    }, 150);
-
-    return { success: true, method: 'direct' };
-  } catch (err) {
-    console.warn('Direct print encountered issue, falling back to PDF:', err);
-    try {
-      generateInvoicePDF(invoice, settings);
-      return { success: true, method: 'pdf' };
-    } catch (pdfErr) {
-      console.error('PDF export failed:', pdfErr);
-      return { success: false, method: 'direct' };
-    }
-  }
+): { success: boolean; popupBlocked?: boolean } {
+  const html = generateCompletePrintDocument(invoice, settings);
+  const title = `Invoice_${invoice.invoiceNumber}`;
+  return executeBrowserPrint(html, title);
 }
 
 function generateCompletePrintDocument(invoice: Invoice, settings: BusinessSettings): string {

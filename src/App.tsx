@@ -64,6 +64,11 @@ const AppShell: React.FC = () => {
     setCurrentTab('billing');
   };
 
+  const handleSelectInvoice = (inv: Invoice, autoPrint: boolean = false) => {
+    setPreviewInvoice(inv);
+    setAutoPrintInvoice(autoPrint);
+  };
+
   const handleInvoiceCreated = (newInv: Invoice, autoPrint: boolean = false) => {
     setPreviewInvoice(newInv);
     setAutoPrintInvoice(autoPrint);
@@ -102,7 +107,7 @@ const AppShell: React.FC = () => {
         <Navbar
           onOpenNewBill={handleOpenNewBill}
           onNavigateTab={handleNavigateTab}
-          onSelectInvoice={inv => setPreviewInvoice(inv)}
+          onSelectInvoice={handleSelectInvoice}
           onToggleMobileMenu={() => setIsMobileSidebarOpen(!isMobileSidebarOpen)}
         />
 
@@ -112,7 +117,7 @@ const AppShell: React.FC = () => {
             <DashboardPage
               onNavigateTab={handleNavigateTab}
               onOpenNewBill={handleOpenNewBill}
-              onSelectInvoice={inv => setPreviewInvoice(inv)}
+              onSelectInvoice={handleSelectInvoice}
             />
           )}
 
@@ -125,7 +130,7 @@ const AppShell: React.FC = () => {
 
           {currentTab === 'invoices' && (
             <InvoicesPage
-              onSelectInvoice={inv => setPreviewInvoice(inv)}
+              onSelectInvoice={handleSelectInvoice}
               onOpenNewBill={handleOpenNewBill}
               initialSearch={tabSearchQuery}
             />

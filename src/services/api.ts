@@ -72,6 +72,18 @@ export const api = {
       await delay(10);
       return db.generateNextInvoiceNumber();
     },
+    resetSalesData: async (): Promise<Invoice[]> => {
+      await delay();
+      return db.resetSalesData();
+    },
+    delete: async (id: string): Promise<boolean> => {
+      await delay();
+      return db.deleteInvoice(id);
+    },
+    deleteMultiple: async (ids: string[]): Promise<boolean> => {
+      await delay();
+      return db.deleteInvoices(ids);
+    },
   },
 
   // --- Dashboard APIs ---
@@ -101,20 +113,20 @@ export const api = {
       const invoices = db.getInvoices();
       const now = new Date();
       const todayStr = now.toISOString().split('T')[0];
+      const currentYear = now.getFullYear();
+      const currentYearPrefix = `${currentYear}-`;
+      const currentMonthPrefix = `${currentYear}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+      const sevenDaysAgoStr = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
       let filtered = invoices;
       if (range === 'today') {
         filtered = invoices.filter(inv => inv.date === todayStr);
       } else if (range === 'week') {
-        filtered = invoices.filter(inv => {
-          const diff = (now.getTime() - new Date(inv.date).getTime()) / (1000 * 3600 * 24);
-          return diff <= 7;
-        });
+        filtered = invoices.filter(inv => inv.date >= sevenDaysAgoStr && inv.date <= todayStr);
       } else if (range === 'month') {
-        filtered = invoices.filter(inv => {
-          const d = new Date(inv.date);
-          return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-        });
+        filtered = invoices.filter(inv => inv.date.startsWith(currentMonthPrefix));
+      } else if (range === 'year') {
+        filtered = invoices.filter(inv => inv.date.startsWith(currentYearPrefix));
       } else if (range === 'custom') {
         filtered = invoices.filter(inv => {
           if (startDate && inv.date < startDate) return false;
@@ -126,33 +138,36 @@ export const api = {
       const totalRevenue = filtered.reduce((acc, inv) => acc + inv.grandTotal, 0);
       const totalBills = filtered.length;
 
-      // Today's, Weekly, Monthly sales
+      // Today's, Weekly, Monthly, Yearly sales
       const todaySales = invoices
         .filter(inv => inv.date === todayStr)
         .reduce((acc, inv) => acc + inv.grandTotal, 0);
 
       const weeklySales = invoices
-        .filter(inv => {
-          const diff = (now.getTime() - new Date(inv.date).getTime()) / (1000 * 3600 * 24);
-          return diff <= 7;
-        })
+        .filter(inv => inv.date >= sevenDaysAgoStr && inv.date <= todayStr)
         .reduce((acc, inv) => acc + inv.grandTotal, 0);
 
       const monthlySales = invoices
-        .filter(inv => {
-          const d = new Date(inv.date);
-          return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-        })
+        .filter(inv => inv.date.startsWith(currentMonthPrefix))
+        .reduce((acc, inv) => acc + inv.grandTotal, 0);
+
+      const yearlySales = invoices
+        .filter(inv => inv.date.startsWith(currentYearPrefix))
         .reduce((acc, inv) => acc + inv.grandTotal, 0);
 
       return {
         todaySales: Number(todaySales.toFixed(2)),
         weeklySales: Number(weeklySales.toFixed(2)),
         monthlySales: Number(monthlySales.toFixed(2)),
+        yearlySales: Number(yearlySales.toFixed(2)),
         totalBills,
         totalRevenue: Number(totalRevenue.toFixed(2)),
         filteredInvoices: filtered,
       };
+    },
+    resetSalesData: async (): Promise<Invoice[]> => {
+      await delay();
+      return db.resetSalesData();
     },
     getDailySales: async () => {
       await delay();

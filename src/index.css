@@ -34,16 +34,27 @@
   background: rgba(148, 163, 184, 0.7);
 }
 
-/* Specialized Clean Print Stylesheet for Retail Shop Bill & A4 Invoices */
+/* Screen visibility rules for standalone print containers */
+#smartbill-printable-report,
+#smartbill-printable-invoice {
+  display: none !important;
+}
+
+/* ========================================================================= */
+/* Specialized Laptop & Desktop Print Stylesheet                             */
+/* Ensures window.print() prints ONLY the relevant bill / invoice / report   */
+/* Hides ALL website navigation, sidebar, toolbars, buttons, overlays        */
+/* ========================================================================= */
 @media print {
   @page {
     size: auto;
-    margin: 4mm 6mm;
+    margin: 5mm 6mm;
   }
 
   html,
   body {
     background: #ffffff !important;
+    background-color: #ffffff !important;
     color: #000000 !important;
     margin: 0 !important;
     padding: 0 !important;
@@ -53,6 +64,60 @@
     overflow: visible !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
+  }
+
+  /* Universal hiding of website UI: sidebars, navbars, buttons, inputs, modals control bars */
+  aside,
+  header,
+  nav,
+  button,
+  input,
+  select,
+  textarea,
+  .print\:hidden {
+    display: none !important;
+  }
+
+  /* ------------------------------------------------------------- */
+  /* MODE 1: Standalone Report Printing (Sales Report / Users)    */
+  /* ------------------------------------------------------------- */
+  body.printing-report #root {
+    display: none !important;
+  }
+
+  body.printing-report #smartbill-printable-report {
+    display: block !important;
+    visibility: visible !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 4mm 6mm !important;
+    background: #ffffff !important;
+    color: #0f172a !important;
+  }
+
+  /* ------------------------------------------------------------- */
+  /* MODE 2: Standalone Invoice Printing                           */
+  /* ------------------------------------------------------------- */
+  body.printing-standalone-invoice #root {
+    display: none !important;
+  }
+
+  body.printing-standalone-invoice #smartbill-printable-invoice {
+    display: block !important;
+    visibility: visible !important;
+    width: 100% !important;
+    max-width: 520px !important;
+    margin: 0 auto !important;
+    padding: 4mm 6mm !important;
+    background: #ffffff !important;
+    color: #0f172a !important;
+  }
+
+  /* ------------------------------------------------------------- */
+  /* MODE 3: Invoice Modal Printing (Bill / Receipt)               */
+  /* ------------------------------------------------------------- */
+  body:not(.printing-report):not(.printing-standalone-invoice) main {
+    display: none !important;
   }
 
   #root,
@@ -65,24 +130,12 @@
     background: transparent !important;
   }
 
-  /* Hide app navigation, sidebars, header, main page background, action buttons */
-  aside,
-  header,
-  main,
-  nav,
-  button,
-  input,
-  select,
-  textarea,
-  .print\:hidden {
-    display: none !important;
-  }
-
-  /* Remove modal constraints and backdrop overlays */
+  /* Strip all dark modal overlays, borders, fixed positioning */
   .fixed {
     position: static !important;
     inset: auto !important;
-    background: #ffffff !important;
+    background: transparent !important;
+    background-color: transparent !important;
     backdrop-filter: none !important;
     padding: 0 !important;
     margin: 0 !important;
@@ -103,8 +156,10 @@
     border: none !important;
     box-shadow: none !important;
     background: transparent !important;
+    background-color: transparent !important;
   }
 
+  /* Printable retail bill card */
   #printable-invoice {
     display: block !important;
     visibility: visible !important;
@@ -116,8 +171,10 @@
     border: 1px solid #94a3b8 !important;
     box-shadow: none !important;
     background: #ffffff !important;
+    background-color: #ffffff !important;
     color: #0f172a !important;
     overflow: visible !important;
     page-break-inside: avoid;
+    break-inside: avoid;
   }
 }
