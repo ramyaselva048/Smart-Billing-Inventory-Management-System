@@ -1,0 +1,6 @@
+{
+  "name": "SMART BILL – Billing and Inventory Management System",
+  "description": "Production-ready billing, inventory, POS, customer, invoice, and financial reporting system with role-based access control.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
