@@ -34,8 +34,10 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState('');
+  const [highlightedIndex, setHighlightedIndex] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
 
   const selectedOption = options.find(o => o.value === value);
 
@@ -49,16 +51,6 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
     return () => document.removeEventListener('mousedown', handleOutsideClick);
   }, []);
 
-  useEffect(() => {
-    if (isOpen) {
-      setTimeout(() => {
-        searchInputRef.current?.focus();
-      }, 50);
-    } else {
-      setSearch('');
-    }
-  }, [isOpen]);
-
   const filteredOptions = options.filter(opt => {
     const q = search.toLowerCase().trim();
     if (!q) return true;
@@ -69,6 +61,23 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
       opt.value.toLowerCase().includes(q)
     );
   });
+
+  useEffect(() => {
+    if (isOpen) {
+      const idx = filteredOptions.findIndex(o => o.value === value);
+      setHighlightedIndex(idx >= 0 ? idx : 0);
+      setTimeout(() => {
+        searchInputRef.current?.focus();
+      }, 50);
+    } else {
+      setSearch('');
+      setHighlightedIndex(0);
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    setHighlightedIndex(0);
+  }, [search]);
 
   return (
     <div className={`relative ${className}`} ref={containerRef}>
@@ -135,9 +144,24 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
               onKeyDown={e => {
                 if (e.key === 'Escape') {
                   setIsOpen(false);
-                } else if (e.key === 'Enter' && filteredOptions.length > 0) {
-                  onChange(filteredOptions[0].value);
-                  setIsOpen(false);
+                } else if (e.key === 'ArrowDown') {
+                  e.preventDefault();
+                  setHighlightedIndex(prev =>
+                    filteredOptions.length > 0 ? (prev + 1) % filteredOptions.length : 0
+                  );
+                } else if (e.key === 'ArrowUp') {
+                  e.preventDefault();
+                  setHighlightedIndex(prev =>
+                    filteredOptions.length > 0
+                      ? (prev - 1 + filteredOptions.length) % filteredOptions.length
+                      : 0
+                  );
+                } else if (e.key === 'Enter') {
+                  e.preventDefault();
+                  if (filteredOptions.length > 0 && highlightedIndex >= 0 && highlightedIndex < filteredOptions.length) {
+                    onChange(filteredOptions[highlightedIndex].value);
+                    setIsOpen(false);
+                  }
                 }
               }}
               className="w-full pl-8 pr-7 py-1.5 bg-slate-100 hover:bg-slate-50 focus:bg-white text-xs text-slate-800 placeholder-slate-400 rounded-lg border border-slate-200 focus:border-blue-500 focus:outline-hidden"
@@ -154,18 +178,20 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
           </div>
 
           {/* Options list */}
-          <div className="overflow-y-auto flex-1 divide-y divide-slate-50 custom-scrollbar pr-0.5">
+          <div ref={listRef} className="overflow-y-auto flex-1 divide-y divide-slate-50 custom-scrollbar pr-0.5">
             {filteredOptions.length === 0 ? (
               <div className="py-4 text-center text-[11px] text-slate-400">
                 No matching results found for "{search}"
               </div>
             ) : (
-              filteredOptions.map(opt => {
+              filteredOptions.map((opt, idx) => {
                 const isSelected = opt.value === value;
+                const isHighlighted = idx === highlightedIndex;
                 return (
                   <button
                     key={opt.value}
                     type="button"
+                    onMouseEnter={() => setHighlightedIndex(idx)}
                     onClick={() => {
                       onChange(opt.value);
                       setIsOpen(false);
@@ -173,6 +199,8 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
                     className={`w-full text-left px-2.5 py-2 rounded-lg flex items-center justify-between text-xs transition-colors cursor-pointer ${
                       isSelected
                         ? 'bg-blue-50 text-blue-700 font-semibold'
+                        : isHighlighted
+                        ? 'bg-slate-100 text-slate-900 font-medium'
                         : 'hover:bg-slate-50 text-slate-700'
                     }`}
                   >

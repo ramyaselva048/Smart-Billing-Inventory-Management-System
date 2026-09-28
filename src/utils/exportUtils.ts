@@ -9,12 +9,12 @@ export interface ReportSummaryCard {
  * Robust CSV Export utility
  */
 export function exportToCSV(filename: string, headers: string[], rows: (string | number)[][]): void {
-  const escapeCell = (val: string | number) => {
+  const escapeCell = (val: string | number | undefined | null) => {
     const s = String(val ?? '').replace(/"/g, '""');
     return `"${s}"`;
   };
 
-  const csvContent = [
+  const csvContent = '\uFEFF' + [
     headers.map(escapeCell).join(','),
     ...rows.map(row => row.map(escapeCell).join(',')),
   ].join('\r\n');
@@ -23,7 +23,8 @@ export function exportToCSV(filename: string, headers: string[], rows: (string |
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.setAttribute('href', url);
-  link.setAttribute('download', `${filename.replace(/[^a-zA-Z0-9_-]/g, '_')}.csv`);
+  const safeFilename = (filename || 'export').replace(/[^a-zA-Z0-9_-]/g, '_');
+  link.setAttribute('download', `${safeFilename}.csv`);
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
@@ -31,7 +32,7 @@ export function exportToCSV(filename: string, headers: string[], rows: (string |
 }
 
 /**
- * Universal Print Report utility that works in any environment without external iframe dependencies
+ * Universal Print Report utility that works in any environment including sandboxed iFrames
  */
 export function printReport(
   title: string,
@@ -40,7 +41,6 @@ export function printReport(
   rows: (string | number)[][],
   summaryCards?: ReportSummaryCard[]
 ): void {
-  const printWindow = window.open('', '_blank');
   const now = new Date().toLocaleString('en-IN', {
     dateStyle: 'medium',
     timeStyle: 'short',
@@ -60,7 +60,7 @@ export function printReport(
   const tableRowsHtml = rows.map((r, i) => `
     <tr style="background-color: ${i % 2 === 0 ? '#ffffff' : '#f8fafc'};">
       ${r.map(cell => `
-        <td style="padding: 8px 10px; border-bottom: 1px solid #e2e8f0; font-size: 12px; color: #1e293b;">
+        <td style="padding: 8px 10px; border-bottom: 1px solid #e2e8f0; font-size: 11px; color: #1e293b;">
           ${cell}
         </td>
       `).join('')}
@@ -73,15 +73,15 @@ export function printReport(
       <head>
         <title>${title} - SMART BILL</title>
         <style>
-          @page { size: A4 landscape; margin: 12mm; }
+          @page { size: A4 landscape; margin: 10mm; }
           body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             margin: 0;
-            padding: 10mm;
+            padding: 8mm;
             color: #0f172a;
             background: #ffffff;
-            -webkit-print-color-adjust: exact;
-            print-color-adjust: exact;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
           }
           * { box-sizing: border-box; }
           .header {
@@ -92,14 +92,14 @@ export function printReport(
             padding-bottom: 12px;
             margin-bottom: 16px;
           }
-          .title { font-size: 20px; font-weight: 800; color: #0f172a; margin: 0; }
-          .subtitle { font-size: 12px; color: #64748b; margin-top: 3px; }
+          .title { font-size: 18px; font-weight: 800; color: #0f172a; margin: 0; }
+          .subtitle { font-size: 11px; color: #64748b; margin-top: 3px; }
           .meta { font-size: 11px; color: #64748b; text-align: right; }
-          table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; }
+          table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 11px; }
           th {
             background-color: #f1f5f9;
             color: #334155;
-            font-size: 11px;
+            font-size: 10px;
             font-weight: 700;
             text-transform: uppercase;
             letter-spacing: 0.5px;
@@ -123,7 +123,7 @@ export function printReport(
           <div>
             <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
               <span style="background: #2563eb; color: #ffffff; padding: 2px 6px; border-radius: 4px; font-weight: 900; font-size: 11px;">SMART BILL</span>
-              <span style="font-size: 12px; color: #64748b; font-weight: 600;">Enterprise Management</span>
+              <span style="font-size: 11px; color: #64748b; font-weight: 600;">Enterprise Management</span>
             </div>
             <h1 class="title">${title}</h1>
             <div class="subtitle">${subtitle}</div>
@@ -148,23 +148,50 @@ export function printReport(
         </table>
 
         <div class="footer">
-          <span>SMART BILL • Billing and Inventory Management System</span>
+          <span>SMART BILL • Billing & Invoice Management System</span>
           <span>Confidential Business Document</span>
         </div>
       </body>
     </html>
   `;
 
-  if (printWindow) {
-    printWindow.document.open();
-    printWindow.document.write(html);
-    printWindow.document.close();
-    printWindow.focus();
-    setTimeout(() => {
-      printWindow.print();
-    }, 400);
-  } else {
-    // If popup blocked, print the current window
+  try {
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = '0';
+    iframe.style.visibility = 'hidden';
+    document.body.appendChild(iframe);
+
+    const doc = iframe.contentWindow?.document || iframe.contentDocument;
+    if (doc) {
+      doc.open();
+      doc.write(html);
+      doc.close();
+
+      setTimeout(() => {
+        try {
+          iframe.contentWindow?.focus();
+          iframe.contentWindow?.print();
+        } catch (e) {
+          console.error('Iframe print error:', e);
+          window.print();
+        } finally {
+          setTimeout(() => {
+            if (document.body.contains(iframe)) {
+              document.body.removeChild(iframe);
+            }
+          }, 1500);
+        }
+      }, 350);
+    } else {
+      window.print();
+    }
+  } catch (err) {
+    console.error('Print failure:', err);
     window.print();
   }
 }
@@ -206,7 +233,7 @@ export function downloadPDFReport(
   doc.setTextColor(100, 116, 139);
   doc.setFontSize(8);
   doc.setFont('helvetica', 'normal');
-  doc.text('Enterprise Billing & Inventory System', margin + 30, currentY + 4.8);
+  doc.text('Billing & Invoice Management System', margin + 30, currentY + 4.8);
 
   const dateStr = new Date().toLocaleString('en-IN', {
     dateStyle: 'medium',
@@ -333,7 +360,7 @@ export function downloadPDFReport(
     doc.setFontSize(7.5);
     doc.setTextColor(148, 163, 184);
     doc.text(
-      'SMART BILL • Billing & Inventory System — Confidential Business Report',
+      'SMART BILL • Billing & Invoice Management System — Confidential Business Report',
       margin,
       pageHeight - 7
     );

@@ -8,6 +8,35 @@ export function formatCurrency(amount: number, symbol: string = '₹'): string {
   return `${isNeg ? '-' : ''}${symbol}${formatted}`;
 }
 
+export function formatReceiptDate(isoOrDateStr: string): string {
+  if (!isoOrDateStr) return '';
+  try {
+    const d = new Date(isoOrDateStr);
+    if (isNaN(d.getTime())) return isoOrDateStr;
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    return `${day}-${month}-${year}`;
+  } catch {
+    return isoOrDateStr;
+  }
+}
+
+export function formatReceiptDateTime(isoOrDateStr: string): string {
+  if (!isoOrDateStr) return '';
+  try {
+    const d = new Date(isoOrDateStr);
+    if (isNaN(d.getTime())) return isoOrDateStr;
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    const time = d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+    return `${day}-${month}-${year} ${time}`;
+  } catch {
+    return isoOrDateStr;
+  }
+}
+
 export function formatDate(isoOrDateStr: string): string {
   if (!isoOrDateStr) return '-';
   try {
@@ -110,24 +139,4 @@ export function numberToWordsINR(amount: number): string {
   return result.trim() + ' Only';
 }
 
-export function exportToCSV(filename: string, headers: string[], rows: (string | number)[][]): void {
-  const escapeCell = (val: string | number) => {
-    const s = String(val ?? '').replace(/"/g, '""');
-    return `"${s}"`;
-  };
-
-  const csvContent = [
-    headers.map(escapeCell).join(','),
-    ...rows.map(row => row.map(escapeCell).join(',')),
-  ].join('\r\n');
-
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.setAttribute('href', url);
-  link.setAttribute('download', `${filename}.csv`);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
-}
+export { exportToCSV } from './exportUtils';

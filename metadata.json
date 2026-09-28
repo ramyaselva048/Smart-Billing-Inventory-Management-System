@@ -1,6 +1,6 @@
 {
-  "name": "SMART BILL – Billing and Inventory Management System",
-  "description": "Production-ready billing, inventory, POS, customer, invoice, and financial reporting system with role-based access control.",
+  "name": "SMART BILL – Billing & Invoice Management System",
+  "description": "Clean, professional billing and invoice management system with fast POS billing, automated GST calculation, A4 invoice generation, sales history, and revenue reports.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

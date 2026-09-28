@@ -1,24 +1,16 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
-  BarChart3,
-  Calendar,
   FileSpreadsheet,
   Printer,
-  Download,
+  Calendar,
   TrendingUp,
-  Percent,
   Receipt,
-  Wallet,
-  Clock,
-  ArrowUpRight,
-  ShieldCheck,
-  CheckCircle2,
-  PieChart as PieIcon,
-  Tag,
-  Loader2
+  Search,
+  X,
+  CreditCard,
+  QrCode,
+  Banknote
 } from 'lucide-react';
-import jsPDF from 'jspdf';
-import html2canvas from 'html2canvas';
 import {
   BarChart,
   Bar,
@@ -32,38 +24,56 @@ import {
   Cell,
   Legend
 } from 'recharts';
-import { Invoice, Product, Customer } from '../types';
 import { api } from '../services/api';
-import { formatCurrency, formatDate, exportToCSV } from '../utils/formatters';
+import { Invoice } from '../types';
+import { formatCurrency, formatDate } from '../utils/formatters';
+import { exportToCSV, printReport } from '../utils/exportUtils';
 
 export const ReportsPage: React.FC = () => {
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
-  const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
-  const [isExportingPDF, setIsExportingPDF] = useState(false);
-  const [isPrinting, setIsPrinting] = useState(false);
-  const reportContentRef = useRef<HTMLDivElement>(null);
+  const [dateRange, setDateRange] = useState<'all' | 'today' | 'week' | 'month' | 'custom'>('all');
+  const [customStartDate, setCustomStartDate] = useState('');
+  const [customEndDate, setCustomEndDate] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
 
-  // Filters
-  const [timeRange, setTimeRange] = useState<'today' | '7days' | '30days' | 'year' | 'all'>('30days');
-  const [activeReportTab, setActiveReportTab] = useState<'sales' | 'gst' | 'products' | 'customers'>('sales');
+  const [metrics, setMetrics] = useState<{
+    todaySales: number;
+    weeklySales: number;
+    monthlySales: number;
+    totalBills: number;
+    totalRevenue: number;
+    filteredInvoices: Invoice[];
+  }>({
+    todaySales: 0,
+    weeklySales: 0,
+    monthlySales: 0,
+    totalBills: 0,
+    totalRevenue: 0,
+    filteredInvoices: [],
+  });
+
+  const [dailySalesChart, setDailySalesChart] = useState<any[]>([]);
+  const [monthlySalesChart, setMonthlySalesChart] = useState<any[]>([]);
+  const [paymentSummary, setPaymentSummary] = useState<any[]>([]);
 
   useEffect(() => {
-    loadReportsData();
-  }, []);
+    loadReports();
+  }, [dateRange, customStartDate, customEndDate]);
 
-  const loadReportsData = async () => {
+  const loadReports = async () => {
     try {
       setLoading(true);
-      const [invs, prods, custs] = await Promise.all([
-        api.invoices.getAll(),
-        api.products.getAll(),
-        api.customers.getAll(),
+      const [sum, daily, monthly, payment] = await Promise.all([
+        api.reports.getSummary(dateRange, customStartDate, customEndDate),
+        api.reports.getDailySales(),
+        api.reports.getMonthlySales(),
+        api.reports.getPaymentSummary(),
       ]);
-      setInvoices(invs);
-      setProducts(prods);
-      setCustomers(custs);
+
+      setMetrics(sum);
+      setDailySalesChart(daily);
+      setMonthlySalesChart(monthly);
+      setPaymentSummary(payment);
     } catch (err) {
       console.error('Error loading reports:', err);
     } finally {
@@ -71,581 +81,373 @@ export const ReportsPage: React.FC = () => {
     }
   };
 
-  // Filter invoices based on time range
-  const filteredInvoices = useMemo(() => {
-    const active = invoices.filter(inv => inv.status !== 'cancelled');
-    const now = new Date();
-    const todayStr = now.toISOString().split('T')[0];
+  // Further filter report invoices by user typed search query
+  const searchedInvoices = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return metrics.filteredInvoices;
 
-    return active.filter(inv => {
-      const invDate = new Date(inv.date);
-      if (timeRange === 'today') {
-        return inv.date === todayStr;
-      }
-      if (timeRange === '7days') {
-        const diff = (now.getTime() - invDate.getTime()) / (1000 * 3600 * 24);
-        return diff <= 7;
-      }
-      if (timeRange === '30days') {
-        const diff = (now.getTime() - invDate.getTime()) / (1000 * 3600 * 24);
-        return diff <= 30;
-      }
-      if (timeRange === 'year') {
-        return invDate.getFullYear() === now.getFullYear();
-      }
-      return true; // 'all'
+    return metrics.filteredInvoices.filter(inv => {
+      const matchInv = inv.invoiceNumber.toLowerCase().includes(q);
+      const matchCust = (inv.customerName || '').toLowerCase().includes(q);
+      const matchPay = inv.paymentMethod.toLowerCase().includes(q);
+      const matchItems = inv.items.some(it => it.itemName.toLowerCase().includes(q));
+      const matchAmount = inv.grandTotal.toString().includes(q);
+      return matchInv || matchCust || matchPay || matchItems || matchAmount;
     });
-  }, [invoices, timeRange]);
+  }, [metrics.filteredInvoices, searchQuery]);
 
-  // Overall Metrics
-  const totalInvoices = filteredInvoices.length;
-  const totalSales = filteredInvoices.reduce((a, b) => a + b.grandTotal, 0);
-  const totalTaxable = filteredInvoices.reduce((a, b) => a + b.taxableAmount, 0);
-  const totalTax = filteredInvoices.reduce((a, b) => a + (b.totalCgst + b.totalSgst + b.totalIgst), 0);
-  const totalDiscount = filteredInvoices.reduce((a, b) => a + b.totalDiscount, 0);
-  const totalCollected = filteredInvoices.reduce((a, b) => a + b.paidAmount, 0);
-  const totalPending = filteredInvoices.reduce((a, b) => a + b.balanceAmount, 0);
+  const searchedRevenue = useMemo(() => {
+    return searchedInvoices.reduce((acc, inv) => acc + inv.grandTotal, 0);
+  }, [searchedInvoices]);
 
-  // GST Liability breakdown
-  const gstBreakdown = useMemo(() => {
-    let cgst = 0;
-    let sgst = 0;
-    let igst = 0;
-
-    for (const inv of filteredInvoices) {
-      cgst += inv.totalCgst;
-      sgst += inv.totalSgst;
-      igst += inv.totalIgst;
-    }
-    return {
-      cgst,
-      sgst,
-      igst,
-      totalGst: cgst + sgst + igst,
-    };
-  }, [filteredInvoices]);
-
-  // Product sales performance aggregation
-  const productPerformance = useMemo(() => {
-    const map = new Map<string, { name: string; sku: string; qty: number; revenue: number }>();
-
-    for (const inv of filteredInvoices) {
-      for (const item of inv.items) {
-        const cur = map.get(item.productId) || {
-          name: item.productName,
-          sku: item.sku,
-          qty: 0,
-          revenue: 0,
-        };
-        cur.qty += item.quantity;
-        cur.revenue += item.totalAmount;
-        map.set(item.productId, cur);
-      }
-    }
-    return Array.from(map.values()).sort((a, b) => b.revenue - a.revenue);
-  }, [filteredInvoices]);
-
-  // Customer sales performance aggregation
-  const customerPerformance = useMemo(() => {
-    const map = new Map<string, { name: string; invoices: number; spent: number; pending: number }>();
-
-    for (const inv of filteredInvoices) {
-      const cur = map.get(inv.customerId) || {
-        name: inv.customerName,
-        invoices: 0,
-        spent: 0,
-        pending: 0,
-      };
-      cur.invoices += 1;
-      cur.spent += inv.grandTotal;
-      cur.pending += inv.balanceAmount;
-      map.set(inv.customerId, cur);
-    }
-    return Array.from(map.values()).sort((a, b) => b.spent - a.spent);
-  }, [filteredInvoices]);
-
+  // Export CSV
   const handleExportCSV = () => {
-    if (activeReportTab === 'gst') {
-      const headers = ['Invoice No', 'Date', 'Customer', 'GSTIN', 'Taxable Amt', 'CGST', 'SGST', 'IGST', 'Total GST', 'Grand Total'];
-      const rows = filteredInvoices.map(inv => [
-        inv.invoiceNumber,
-        inv.date,
-        inv.customerName,
-        inv.customerGstin || 'Unregistered',
-        inv.taxableAmount,
-        inv.totalCgst,
-        inv.totalSgst,
-        inv.totalIgst,
-        (inv.totalCgst + inv.totalSgst + inv.totalIgst).toFixed(2),
-        inv.grandTotal
-      ]);
-      exportToCSV(`SmartBill_GST_Report_${timeRange}`, headers, rows);
-    } else if (activeReportTab === 'products') {
-      const headers = ['Product Name', 'SKU', 'Units Sold', 'Total Revenue'];
-      const rows = productPerformance.map(p => [p.name, p.sku, p.qty, p.revenue.toFixed(2)]);
-      exportToCSV(`SmartBill_Product_Sales_${timeRange}`, headers, rows);
-    } else if (activeReportTab === 'customers') {
-      const headers = ['Customer Name', 'Invoices Generated', 'Total Volume', 'Pending Due'];
-      const rows = customerPerformance.map(c => [c.name, c.invoices, c.spent.toFixed(2), c.pending.toFixed(2)]);
-      exportToCSV(`SmartBill_Customer_Performance_${timeRange}`, headers, rows);
-    } else {
-      const headers = ['Invoice No', 'Date', 'Customer', 'Grand Total', 'Paid', 'Balance Due', 'Status', 'Payment Method'];
-      const rows = filteredInvoices.map(inv => [
-        inv.invoiceNumber,
-        inv.date,
-        inv.customerName,
-        inv.grandTotal,
-        inv.paidAmount,
-        inv.balanceAmount,
-        inv.paymentStatus,
-        inv.paymentMethod
-      ]);
-      exportToCSV(`SmartBill_Sales_Summary_${timeRange}`, headers, rows);
-    }
+    const headers = ['Invoice Number', 'Date', 'Customer', 'Payment Method', 'Status', 'Grand Total (₹)'];
+    const rows = searchedInvoices.map(inv => [
+      inv.invoiceNumber,
+      inv.date,
+      inv.customerName || 'Walk-in',
+      inv.paymentMethod,
+      inv.paymentStatus,
+      inv.grandTotal,
+    ]);
+    exportToCSV(`SmartBill_Report_${dateRange}_${new Date().toISOString().split('T')[0]}`, headers, rows);
   };
 
-  const handleDownloadPDF = async () => {
-    if (!reportContentRef.current) return;
-    setIsExportingPDF(true);
-    try {
-      const element = reportContentRef.current;
-      const canvas = await html2canvas(element, {
-        scale: 2,
-        useCORS: true,
-        logging: false,
-        backgroundColor: '#ffffff',
-      });
-
-      const imgData = canvas.toDataURL('image/png');
-      const pdf = new jsPDF({
-        orientation: 'landscape',
-        unit: 'mm',
-        format: 'a4',
-      });
-
-      const imgWidth = 297; // A4 landscape width mm
-      const pageHeight = 210; // A4 landscape height mm
-      const imgHeight = (canvas.height * imgWidth) / canvas.width;
-      let heightLeft = imgHeight;
-      let position = 0;
-
-      pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
-      heightLeft -= pageHeight;
-
-      while (heightLeft > 0) {
-        position = heightLeft - imgHeight;
-        pdf.addPage();
-        pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
-        heightLeft -= pageHeight;
-      }
-
-      pdf.save(`SmartBill_Report_${activeReportTab}_${timeRange}.pdf`);
-    } catch (err) {
-      console.error('Report PDF export error:', err);
-      alert('Could not export PDF. Falling back to print...');
-      window.print();
-    } finally {
-      setIsExportingPDF(false);
-    }
-  };
-
+  // Print Report
   const handlePrint = () => {
-    setIsPrinting(true);
-    try {
-      const printContent = reportContentRef.current;
-      if (!printContent) {
-        window.print();
-        setIsPrinting(false);
-        return;
-      }
+    const headers = ['Invoice Number', 'Date', 'Customer', 'Payment Method', 'Status', 'Total (₹)'];
+    const rows = searchedInvoices.map(inv => [
+      inv.invoiceNumber,
+      inv.date,
+      inv.customerName || 'Walk-in',
+      inv.paymentMethod,
+      inv.paymentStatus,
+      formatCurrency(inv.grandTotal),
+    ]);
 
-      const iframe = document.createElement('iframe');
-      iframe.style.position = 'fixed';
-      iframe.style.right = '0';
-      iframe.style.bottom = '0';
-      iframe.style.width = '0';
-      iframe.style.height = '0';
-      iframe.style.border = '0';
-      document.body.appendChild(iframe);
-
-      const doc = iframe.contentWindow?.document || iframe.contentDocument;
-      if (doc) {
-        doc.open();
-        doc.write(`
-          <!DOCTYPE html>
-          <html>
-            <head>
-              <title>SmartBill Report - ${activeReportTab.toUpperCase()}</title>
-              <style>
-                @page { size: landscape; margin: 10mm; }
-                body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 10px; margin: 0; color: #0f172a; }
-                table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 11px; }
-                th, td { padding: 6px 8px; border-bottom: 1px solid #e2e8f0; }
-                th { background-color: #f8fafc; font-weight: bold; text-align: left; }
-                .text-right { text-align: right; }
-                .text-center { text-align: center; }
-                .font-bold { font-weight: bold; }
-                .font-mono { font-family: monospace; }
-              </style>
-              <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
-            </head>
-            <body>
-              <h2 style="font-size: 18px; font-weight: bold; margin-bottom: 4px;">SMART BILL - ${activeReportTab.toUpperCase()} REPORT</h2>
-              <p style="font-size: 11px; color: #64748b; margin-bottom: 16px;">Timeframe: ${timeRange.toUpperCase()} • Generated on: ${new Date().toLocaleDateString()}</p>
-              ${printContent.innerHTML}
-            </body>
-          </html>
-        `);
-        doc.close();
-
-        setTimeout(() => {
-          try {
-            iframe.contentWindow?.focus();
-            iframe.contentWindow?.print();
-          } catch (err) {
-            window.print();
-          } finally {
-            setTimeout(() => {
-              if (document.body.contains(iframe)) {
-                document.body.removeChild(iframe);
-              }
-              setIsPrinting(false);
-            }, 1000);
-          }
-        }, 400);
-      } else {
-        window.print();
-        setIsPrinting(false);
-      }
-    } catch {
-      window.print();
-      setIsPrinting(false);
-    }
+    printReport(
+      'Sales & Revenue Report',
+      `Filter: ${dateRange.toUpperCase()} ${customStartDate ? `(${customStartDate} to ${customEndDate || 'today'})` : ''} • Generated on ${new Date().toLocaleDateString('en-IN')}`,
+      headers,
+      rows,
+      [
+        { label: "Today's Sales", value: formatCurrency(metrics.todaySales) },
+        { label: 'Weekly Sales', value: formatCurrency(metrics.weeklySales) },
+        { label: 'Monthly Sales', value: formatCurrency(metrics.monthlySales) },
+        { label: 'Filtered Revenue', value: formatCurrency(searchedRevenue) },
+        { label: 'Filtered Bills', value: String(searchedInvoices.length) },
+      ]
+    );
   };
+
+  const COLORS = ['#10b981', '#3b82f6', '#8b5cf6'];
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">Reports & Business Intelligence</h1>
+          <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">Sales Reports</h1>
           <p className="text-xs text-slate-500 mt-0.5">
-            Audit-ready financial statements, GST filings, and sales performance analytics
+            Comprehensive sales summaries, revenue statistics, custom date range, and payment breakdowns.
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          {/* Export CSV */}
+        <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={handleExportCSV}
-            className="px-3 py-1.5 rounded-xl border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
-            title="Download CSV Spreadsheet"
+            className="px-3.5 py-2 rounded-xl border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+            title="Export CSV"
           >
             <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
             <span>Export CSV</span>
           </button>
 
-          {/* Download PDF */}
-          <button
-            onClick={handleDownloadPDF}
-            disabled={isExportingPDF}
-            className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-xs disabled:opacity-50"
-            title="Download High-Res PDF"
-          >
-            {isExportingPDF ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin text-white" />
-                <span>PDF...</span>
-              </>
-            ) : (
-              <>
-                <Download className="w-4 h-4" />
-                <span>Save PDF</span>
-              </>
-            )}
-          </button>
-
-          {/* Print Report */}
           <button
             onClick={handlePrint}
-            disabled={isPrinting}
-            className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs disabled:opacity-50"
+            className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
             title="Print Report"
           >
-            {isPrinting ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin text-white" />
-                <span>Printing...</span>
-              </>
-            ) : (
-              <>
-                <Printer className="w-4 h-4" />
-                <span>Print</span>
-              </>
-            )}
+            <Printer className="w-4 h-4" />
+            <span>Print Report</span>
           </button>
         </div>
       </div>
 
-      {/* Date Range Selector Bar */}
-      <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-1.5 overflow-x-auto text-xs">
-          {[
-            { id: 'today', label: 'Today' },
-            { id: '7days', label: 'Last 7 Days' },
-            { id: '30days', label: 'Last 30 Days' },
-            { id: 'year', label: 'This Financial Year' },
-            { id: 'all', label: 'All Records' },
-          ].map(t => (
-            <button
-              key={t.id}
-              onClick={() => setTimeRange(t.id as any)}
-              className={`px-3 py-1.5 rounded-xl font-semibold transition-all ${
-                timeRange === t.id
-                  ? 'bg-blue-600 text-white shadow-xs'
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
-
-        <span className="text-xs text-slate-500 font-mono">
-          Showing {filteredInvoices.length} Invoices
-        </span>
-      </div>
-
-      {/* Metric KPI Cards (6 metrics) */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-          <span className="text-[10px] font-bold text-slate-400 uppercase">Gross Sales</span>
-          <div className="text-lg font-black text-slate-900 font-mono mt-1">{formatCurrency(totalSales)}</div>
-        </div>
-
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-          <span className="text-[10px] font-bold text-slate-400 uppercase">Taxable Value</span>
-          <div className="text-lg font-black text-slate-700 font-mono mt-1">{formatCurrency(totalTaxable)}</div>
-        </div>
-
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-          <span className="text-[10px] font-bold text-slate-400 uppercase">Total GST (Tax)</span>
-          <div className="text-lg font-black text-blue-600 font-mono mt-1">{formatCurrency(totalTax)}</div>
-        </div>
-
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-          <span className="text-[10px] font-bold text-slate-400 uppercase">Discounts</span>
-          <div className="text-lg font-black text-emerald-600 font-mono mt-1">{formatCurrency(totalDiscount)}</div>
-        </div>
-
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-          <span className="text-[10px] font-bold text-slate-400 uppercase">Collected</span>
-          <div className="text-lg font-black text-teal-600 font-mono mt-1">{formatCurrency(totalCollected)}</div>
-        </div>
-
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-          <span className="text-[10px] font-bold text-slate-400 uppercase">Pending Due</span>
-          <div className="text-lg font-black text-amber-600 font-mono mt-1">{formatCurrency(totalPending)}</div>
-        </div>
-      </div>
-
-      {/* Report Sub-tabs: Sales, GST, Products, Customers */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
-        <div className="border-b border-slate-200 bg-slate-50/70 px-4 pt-3 flex items-center gap-4 overflow-x-auto text-xs">
-          {[
-            { id: 'sales', label: 'Sales & Invoices Report', icon: Receipt },
-            { id: 'gst', label: 'GST Tax Liability (GSTR-1)', icon: ShieldCheck },
-            { id: 'products', label: 'Product Sales Volume', icon: Tag },
-            { id: 'customers', label: 'Customer Purchase Volume', icon: PieIcon },
-          ].map(tab => {
-            const Icon = tab.icon;
-            const isActive = activeReportTab === tab.id;
-            return (
+      {/* Date Range & Search Filter Bar */}
+      <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          {/* Preset Buttons */}
+          <div className="flex items-center gap-1.5 text-xs flex-wrap">
+            <span className="text-slate-400 text-xs flex items-center gap-1 mr-1">
+              <Calendar className="w-3.5 h-3.5" /> Filter Range:
+            </span>
+            {[
+              { id: 'all', label: 'All Records' },
+              { id: 'today', label: "Today's Sales" },
+              { id: 'week', label: 'This Week' },
+              { id: 'month', label: 'This Month' },
+              { id: 'custom', label: 'Custom Range' },
+            ].map(opt => (
               <button
-                key={tab.id}
-                onClick={() => setActiveReportTab(tab.id as any)}
-                className={`pb-3 font-bold flex items-center gap-1.5 border-b-2 whitespace-nowrap transition-colors ${
-                  isActive
-                    ? 'border-blue-600 text-blue-600'
-                    : 'border-transparent text-slate-500 hover:text-slate-800'
+                key={opt.id}
+                onClick={() => setDateRange(opt.id as any)}
+                className={`px-3 py-1.5 rounded-lg font-semibold text-xs transition-colors cursor-pointer whitespace-nowrap ${
+                  dateRange === opt.id
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                 }`}
               >
-                <Icon className="w-4 h-4" />
-                {tab.label}
+                {opt.label}
               </button>
-            );
-          })}
+            ))}
+          </div>
+
+          {/* Search within Report Input (Typeable) */}
+          <div className="relative w-full sm:w-72">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              type="text"
+              placeholder="Type to filter report..."
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              className="w-full pl-8 pr-7 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:bg-white focus:outline-hidden focus:border-blue-500"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5 cursor-pointer"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            )}
+          </div>
         </div>
 
-        <div ref={reportContentRef} className="p-5 bg-white">
-          {/* Tab 1: Sales Summary */}
-          {activeReportTab === 'sales' && (
-            <div className="space-y-4">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-50 text-slate-600 font-semibold uppercase tracking-wider text-[10px]">
-                    <tr>
-                      <th className="px-4 py-3">Invoice #</th>
-                      <th className="px-4 py-3">Date</th>
-                      <th className="px-4 py-3">Customer</th>
-                      <th className="px-4 py-3 text-right">Taxable</th>
-                      <th className="px-4 py-3 text-right">GST</th>
-                      <th className="px-4 py-3 text-right">Grand Total</th>
-                      <th className="px-4 py-3">Method</th>
-                      <th className="px-4 py-3">Payment</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {filteredInvoices.map(inv => (
-                      <tr key={inv.id} className="hover:bg-slate-50/70">
-                        <td className="px-4 py-3 font-mono font-bold text-blue-600">{inv.invoiceNumber}</td>
-                        <td className="px-4 py-3 text-slate-500">{formatDate(inv.date)}</td>
-                        <td className="px-4 py-3 font-bold text-slate-900">{inv.customerName}</td>
-                        <td className="px-4 py-3 text-right font-mono text-slate-600">{formatCurrency(inv.taxableAmount)}</td>
-                        <td className="px-4 py-3 text-right font-mono text-slate-600">
-                          {formatCurrency(inv.totalCgst + inv.totalSgst + inv.totalIgst)}
-                        </td>
-                        <td className="px-4 py-3 text-right font-mono font-bold text-slate-900">{formatCurrency(inv.grandTotal)}</td>
-                        <td className="px-4 py-3 text-slate-700">{inv.paymentMethod}</td>
-                        <td className="px-4 py-3">
-                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                            inv.paymentStatus === 'Paid' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
-                          }`}>
-                            {inv.paymentStatus}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+        {/* Custom Date Inputs (Typeable) */}
+        {dateRange === 'custom' && (
+          <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center gap-3 text-xs bg-slate-50/50 p-2.5 rounded-xl">
+            <span className="font-semibold text-slate-700">Type / Select Dates:</span>
+            <div className="flex items-center gap-2">
+              <span className="text-slate-500 text-[11px]">From:</span>
+              <input
+                type="date"
+                value={customStartDate}
+                onChange={e => setCustomStartDate(e.target.value)}
+                className="px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs text-slate-800 focus:outline-hidden focus:border-blue-500"
+              />
             </div>
-          )}
-
-          {/* Tab 2: GST Liability */}
-          {activeReportTab === 'gst' && (
-            <div className="space-y-6">
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 bg-blue-50/40 p-4 rounded-xl border border-blue-200">
-                <div>
-                  <span className="text-[10px] font-bold uppercase text-slate-500">Total Taxable Turnover</span>
-                  <div className="text-xl font-black text-slate-900 font-mono mt-0.5">{formatCurrency(totalTaxable)}</div>
-                </div>
-                <div>
-                  <span className="text-[10px] font-bold uppercase text-blue-600">CGST (Central Tax)</span>
-                  <div className="text-xl font-black text-blue-900 font-mono mt-0.5">{formatCurrency(gstBreakdown.cgst)}</div>
-                </div>
-                <div>
-                  <span className="text-[10px] font-bold uppercase text-blue-600">SGST (State Tax)</span>
-                  <div className="text-xl font-black text-blue-900 font-mono mt-0.5">{formatCurrency(gstBreakdown.sgst)}</div>
-                </div>
-                <div>
-                  <span className="text-[10px] font-bold uppercase text-purple-600">IGST (Integrated Tax)</span>
-                  <div className="text-xl font-black text-purple-900 font-mono mt-0.5">{formatCurrency(gstBreakdown.igst)}</div>
-                </div>
-              </div>
-
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-50 text-slate-600 font-semibold uppercase tracking-wider text-[10px]">
-                    <tr>
-                      <th className="px-4 py-3">Invoice #</th>
-                      <th className="px-4 py-3">Date</th>
-                      <th className="px-4 py-3">Customer</th>
-                      <th className="px-4 py-3">GSTIN</th>
-                      <th className="px-4 py-3 text-right">Taxable Value</th>
-                      <th className="px-4 py-3 text-right">CGST</th>
-                      <th className="px-4 py-3 text-right">SGST</th>
-                      <th className="px-4 py-3 text-right">IGST</th>
-                      <th className="px-4 py-3 text-right">Total GST</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {filteredInvoices.map(inv => (
-                      <tr key={inv.id} className="hover:bg-slate-50/70">
-                        <td className="px-4 py-3 font-mono font-bold text-blue-600">{inv.invoiceNumber}</td>
-                        <td className="px-4 py-3 text-slate-500">{formatDate(inv.date)}</td>
-                        <td className="px-4 py-3 font-bold text-slate-900">{inv.customerName}</td>
-                        <td className="px-4 py-3 font-mono text-[11px] text-slate-600">
-                          {inv.customerGstin || <span className="text-slate-400">Unregistered B2C</span>}
-                        </td>
-                        <td className="px-4 py-3 text-right font-mono text-slate-800">{formatCurrency(inv.taxableAmount)}</td>
-                        <td className="px-4 py-3 text-right font-mono text-slate-600">{formatCurrency(inv.totalCgst)}</td>
-                        <td className="px-4 py-3 text-right font-mono text-slate-600">{formatCurrency(inv.totalSgst)}</td>
-                        <td className="px-4 py-3 text-right font-mono text-slate-600">{formatCurrency(inv.totalIgst)}</td>
-                        <td className="px-4 py-3 text-right font-mono font-bold text-blue-700">
-                          {formatCurrency(inv.totalCgst + inv.totalSgst + inv.totalIgst)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+            <div className="flex items-center gap-2">
+              <span className="text-slate-500 text-[11px]">To:</span>
+              <input
+                type="date"
+                value={customEndDate}
+                onChange={e => setCustomEndDate(e.target.value)}
+                className="px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs text-slate-800 focus:outline-hidden focus:border-blue-500"
+              />
             </div>
-          )}
+            {(customStartDate || customEndDate) && (
+              <button
+                onClick={() => {
+                  setCustomStartDate('');
+                  setCustomEndDate('');
+                }}
+                className="text-xs text-rose-600 hover:underline cursor-pointer"
+              >
+                Clear Dates
+              </button>
+            )}
+          </div>
+        )}
+      </div>
 
-          {/* Tab 3: Product Sales Volume */}
-          {activeReportTab === 'products' && (
-            <div className="space-y-4">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-50 text-slate-600 font-semibold uppercase tracking-wider text-[10px]">
-                    <tr>
-                      <th className="px-4 py-3">Rank</th>
-                      <th className="px-4 py-3">Product Name</th>
-                      <th className="px-4 py-3">SKU</th>
-                      <th className="px-4 py-3 text-center">Units Sold</th>
-                      <th className="px-4 py-3 text-right">Total Revenue Billed</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {productPerformance.map((p, idx) => (
-                      <tr key={p.sku} className="hover:bg-slate-50">
-                        <td className="px-4 py-3 font-mono font-bold text-slate-400">#{idx + 1}</td>
-                        <td className="px-4 py-3 font-bold text-slate-900">{p.name}</td>
-                        <td className="px-4 py-3 font-mono text-slate-500">{p.sku}</td>
-                        <td className="px-4 py-3 text-center font-mono font-bold text-blue-600">{p.qty}</td>
-                        <td className="px-4 py-3 text-right font-mono font-bold text-slate-900">{formatCurrency(p.revenue)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
+      {/* 5 Revenue & Sales KPI Metric Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+        {/* Today's Sales */}
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
+          <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+            Today's Sales
+          </span>
+          <div className="text-xl font-extrabold text-blue-600 font-mono mt-1">
+            {formatCurrency(metrics.todaySales)}
+          </div>
+        </div>
 
-          {/* Tab 4: Customer Performance */}
-          {activeReportTab === 'customers' && (
-            <div className="space-y-4">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-50 text-slate-600 font-semibold uppercase tracking-wider text-[10px]">
-                    <tr>
-                      <th className="px-4 py-3">Customer Name</th>
-                      <th className="px-4 py-3 text-center">Invoices Billed</th>
-                      <th className="px-4 py-3 text-right">Total Billing Volume</th>
-                      <th className="px-4 py-3 text-right">Outstanding Balance</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {customerPerformance.map(c => (
-                      <tr key={c.name} className="hover:bg-slate-50">
-                        <td className="px-4 py-3 font-bold text-slate-900">{c.name}</td>
-                        <td className="px-4 py-3 text-center font-mono font-bold text-blue-600">{c.invoices}</td>
-                        <td className="px-4 py-3 text-right font-mono font-bold text-slate-900">{formatCurrency(c.spent)}</td>
-                        <td className="px-4 py-3 text-right font-mono font-bold">
-                          {c.pending > 0 ? (
-                            <span className="text-amber-600">{formatCurrency(c.pending)}</span>
-                          ) : (
-                            <span className="text-emerald-600">₹0.00</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
+        {/* Weekly Sales */}
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
+          <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+            Weekly Sales
+          </span>
+          <div className="text-xl font-extrabold text-indigo-600 font-mono mt-1">
+            {formatCurrency(metrics.weeklySales)}
+          </div>
+        </div>
+
+        {/* Monthly Sales */}
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
+          <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+            Monthly Sales
+          </span>
+          <div className="text-xl font-extrabold text-purple-600 font-mono mt-1">
+            {formatCurrency(metrics.monthlySales)}
+          </div>
+        </div>
+
+        {/* Filtered Bills */}
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
+          <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+            Filtered Bills
+          </span>
+          <div className="text-xl font-extrabold text-slate-800 font-mono mt-1">
+            {searchedInvoices.length}
+          </div>
+        </div>
+
+        {/* Total Filtered Revenue */}
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
+          <span className="text-[11px] font-bold text-emerald-600 uppercase tracking-wider block">
+            Filtered Revenue
+          </span>
+          <div className="text-xl font-extrabold text-emerald-600 font-mono mt-1">
+            {formatCurrency(searchedRevenue)}
+          </div>
+        </div>
+      </div>
+
+      {/* Charts Section: Daily Sales, Monthly Sales, Cash/UPI/Card Sales */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Daily Sales Chart */}
+        <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs">
+          <h3 className="text-sm font-bold text-slate-900 mb-1">Daily Sales Trend</h3>
+          <p className="text-xs text-slate-500 mb-4">Past 7 days revenue</p>
+          <div className="h-56 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={dailySalesChart} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                <XAxis dataKey="day" stroke="#64748b" fontSize={11} tickLine={false} axisLine={false} />
+                <YAxis stroke="#64748b" fontSize={11} tickLine={false} axisLine={false} tickFormatter={v => `₹${v}`} />
+                <Tooltip
+                  formatter={(v: any) => [formatCurrency(Number(v)), 'Sales']}
+                  contentStyle={{ backgroundColor: '#0f172a', borderRadius: '8px', color: '#fff', fontSize: '11px' }}
+                />
+                <Bar dataKey="sales" fill="#3b82f6" radius={[4, 4, 0, 0]} maxBarSize={36} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Monthly Sales Chart */}
+        <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs">
+          <h3 className="text-sm font-bold text-slate-900 mb-1">Monthly Sales</h3>
+          <p className="text-xs text-slate-500 mb-4">Last 6 months volume</p>
+          <div className="h-56 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={monthlySalesChart} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                <XAxis dataKey="month" stroke="#64748b" fontSize={11} tickLine={false} axisLine={false} />
+                <YAxis stroke="#64748b" fontSize={11} tickLine={false} axisLine={false} tickFormatter={v => `₹${v / 1000}k`} />
+                <Tooltip
+                  formatter={(v: any) => [formatCurrency(Number(v)), 'Monthly Sales']}
+                  contentStyle={{ backgroundColor: '#0f172a', borderRadius: '8px', color: '#fff', fontSize: '11px' }}
+                />
+                <Bar dataKey="sales" fill="#8b5cf6" radius={[4, 4, 0, 0]} maxBarSize={36} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Cash / UPI / Card Sales Pie Chart */}
+        <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs flex flex-col">
+          <h3 className="text-sm font-bold text-slate-900 mb-1">Payment Method Distribution</h3>
+          <p className="text-xs text-slate-500 mb-2">Cash vs UPI vs Card revenue</p>
+          <div className="h-52 w-full flex-1">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={paymentSummary}
+                  dataKey="total"
+                  nameKey="method"
+                  cx="50%"
+                  cy="50%"
+                  outerRadius={65}
+                  innerRadius={40}
+                  paddingAngle={5}
+                >
+                  {paymentSummary.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip
+                  formatter={(v: any) => [formatCurrency(Number(v)), 'Revenue']}
+                  contentStyle={{ backgroundColor: '#0f172a', borderRadius: '8px', color: '#fff', fontSize: '11px' }}
+                />
+                <Legend iconSize={8} wrapperStyle={{ fontSize: '11px' }} />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
+
+      {/* Filtered Report Records Table */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+        <div className="p-4 border-b border-slate-100 flex items-center justify-between">
+          <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">
+            Detailed Invoices Breakdown ({searchedInvoices.length})
+          </h3>
+          <span className="text-xs font-mono font-bold text-emerald-700">
+            Total: {formatCurrency(searchedRevenue)}
+          </span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-slate-50 text-slate-600 font-bold uppercase tracking-wider text-[10px] border-b border-slate-200">
+              <tr>
+                <th className="px-4 py-3">Invoice #</th>
+                <th className="px-4 py-3">Date</th>
+                <th className="px-4 py-3">Customer</th>
+                <th className="px-4 py-3">Items Count</th>
+                <th className="px-4 py-3 text-right">Subtotal</th>
+                <th className="px-4 py-3 text-right">Tax & Disc</th>
+                <th className="px-4 py-3 text-right">Grand Total</th>
+                <th className="px-4 py-3">Payment</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {searchedInvoices.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="px-4 py-8 text-center text-slate-400">
+                    No transactions found for the selected filter.
+                  </td>
+                </tr>
+              ) : (
+                searchedInvoices.map(inv => (
+                  <tr key={inv.id} className="hover:bg-slate-50/70 transition-colors">
+                    <td className="px-4 py-3 font-mono font-bold text-blue-600">
+                      {inv.invoiceNumber}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">{formatDate(inv.date)}</td>
+                    <td className="px-4 py-3 font-medium text-slate-800">
+                      {inv.customerName || <span className="text-slate-400 italic">Walk-in</span>}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">{inv.items.length} items</td>
+                    <td className="px-4 py-3 text-right font-mono">{formatCurrency(inv.subtotal)}</td>
+                    <td className="px-4 py-3 text-right font-mono text-slate-500">
+                      +{formatCurrency(inv.gst)} {inv.discount > 0 ? `(-${formatCurrency(inv.discount)})` : ''}
+                    </td>
+                    <td className="px-4 py-3 text-right font-mono font-bold text-slate-900">
+                      {formatCurrency(inv.grandTotal)}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700">
+                        {inv.paymentMethod}
+                      </span>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
     </div>

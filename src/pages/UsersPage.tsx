@@ -11,18 +11,35 @@ import {
   Mail,
   Phone,
   X,
-  Power
+  Power,
+  FileSpreadsheet,
+  Printer,
+  Download
 } from 'lucide-react';
 import { User, UserRole } from '../types';
 import { api } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { formatDate } from '../utils/formatters';
+import { exportToCSV, printReport, downloadPDFReport } from '../utils/exportUtils';
+import { SearchableSelect } from '../components/common/SearchableSelect';
 
-export const UsersPage: React.FC = () => {
+interface UsersPageProps {
+  initialSearch?: string;
+}
+
+export const UsersPage: React.FC<UsersPageProps> = ({ initialSearch = '' }) => {
   const { user: currentUser } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(initialSearch);
+
+  useEffect(() => {
+    if (initialSearch !== undefined) {
+      setSearch(initialSearch);
+    }
+  }, [initialSearch]);
+
+  const [roleFilter, setRoleFilter] = useState('all');
 
   // Add / Edit Modal
   const [modalOpen, setModalOpen] = useState(false);
@@ -53,6 +70,71 @@ export const UsersPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleExportCSV = () => {
+    const headers = ['User ID', 'Name', 'Email', 'Role', 'Status', 'Phone', 'Created Date'];
+    const rows = filteredUsers.map(u => [
+      u.id,
+      u.name,
+      u.email,
+      u.role.toUpperCase(),
+      u.status.toUpperCase(),
+      u.phone || 'N/A',
+      formatDate(u.createdAt)
+    ]);
+    exportToCSV(`SmartBill_Users_${new Date().toISOString().split('T')[0]}`, headers, rows);
+  };
+
+  const handlePrint = () => {
+    const headers = ['User ID', 'Name', 'Email', 'Role', 'Status', 'Phone', 'Created Date'];
+    const rows = filteredUsers.map(u => [
+      u.id,
+      u.name,
+      u.email,
+      u.role.toUpperCase(),
+      u.status.toUpperCase(),
+      u.phone || 'N/A',
+      formatDate(u.createdAt)
+    ]);
+    printReport(
+      'User Accounts & Access Directory',
+      `Active system accounts, assigned administrative roles, and permission levels`,
+      headers,
+      rows,
+      [
+        { label: 'Total Users', value: String(users.length) },
+        { label: 'Administrators', value: String(users.filter(u => u.role === 'admin').length) },
+        { label: 'Staff Members', value: String(users.filter(u => u.role === 'staff').length) },
+        { label: 'Active Accounts', value: String(users.filter(u => u.status === 'active').length) },
+      ]
+    );
+  };
+
+  const handleDownloadPDF = () => {
+    const headers = ['User ID', 'Name', 'Email', 'Role', 'Status', 'Phone', 'Created Date'];
+    const rows = filteredUsers.map(u => [
+      u.id,
+      u.name,
+      u.email,
+      u.role.toUpperCase(),
+      u.status.toUpperCase(),
+      u.phone || 'N/A',
+      formatDate(u.createdAt)
+    ]);
+    downloadPDFReport(
+      'User Accounts & Access Directory',
+      `Active system accounts, assigned administrative roles, and permission levels`,
+      headers,
+      rows,
+      [
+        { label: 'Total Users', value: String(users.length) },
+        { label: 'Administrators', value: String(users.filter(u => u.role === 'admin').length) },
+        { label: 'Staff Members', value: String(users.filter(u => u.role === 'staff').length) },
+        { label: 'Active Accounts', value: String(users.filter(u => u.status === 'active').length) },
+      ],
+      'users_directory_report'
+    );
   };
 
   const handleOpenAdd = () => {
@@ -102,6 +184,7 @@ export const UsersPage: React.FC = () => {
           phone,
           role,
           status,
+          ...(password.trim() ? { password: password.trim() } : {}),
         });
       } else {
         await api.users.create({
@@ -110,6 +193,7 @@ export const UsersPage: React.FC = () => {
           phone,
           role,
           status,
+          password: password.trim() || (role === 'admin' ? 'admin123' : 'staff123'),
           avatar: `https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80`,
         });
       }
@@ -122,7 +206,6 @@ export const UsersPage: React.FC = () => {
 
   const handleToggleStatus = async (userToToggle: User) => {
     if (userToToggle.id === currentUser?.id) {
-      alert('You cannot deactivate your currently logged-in account.');
       return;
     }
     const newStatus = userToToggle.status === 'active' ? 'inactive' : 'active';
@@ -144,10 +227,35 @@ export const UsersPage: React.FC = () => {
 
   const filteredUsers = useMemo(() => {
     const q = search.toLowerCase().trim();
-    return users.filter(
-      u => !q || u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q)
-    );
-  }, [users, search]);
+    const seenIds = new Set<string>();
+    return users.filter(u => {
+      if (!u || !u.id || seenIds.has(u.id)) return false;
+      seenIds.add(u.id);
+      const matchSearch =
+        !q ||
+        u.name.toLowerCase().includes(q) ||
+        u.email.toLowerCase().includes(q) ||
+        (u.phone && u.phone.includes(q));
+      const matchRole = roleFilter === 'all' || u.role === roleFilter;
+      return matchSearch && matchRole;
+    });
+  }, [users, search, roleFilter]);
+
+  const roleFilterOptions = [
+    { value: 'all', label: 'All Roles' },
+    { value: 'admin', label: 'Administrators' },
+    { value: 'staff', label: 'Staff (POS)' },
+  ];
+
+  const roleModalOptions = [
+    { value: 'staff', label: 'Staff (Sales / Billing POS)', sublabel: 'Standard counter checkout permissions' },
+    { value: 'admin', label: 'Administrator (Full Access)', sublabel: 'Configuration, reports, user control' },
+  ];
+
+  const statusModalOptions = [
+    { value: 'active', label: 'Active', badge: 'ENABLED', badgeColor: 'bg-emerald-100 text-emerald-800' },
+    { value: 'inactive', label: 'Inactive', badge: 'DISABLED', badgeColor: 'bg-rose-100 text-rose-800' },
+  ];
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
@@ -160,25 +268,61 @@ export const UsersPage: React.FC = () => {
           </p>
         </div>
 
-        <button
-          onClick={handleOpenAdd}
-          className="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-semibold rounded-xl flex items-center gap-1.5 shadow-md shadow-blue-500/20 active:scale-98 transition-all cursor-pointer"
-        >
-          <Plus className="w-4 h-4 stroke-[3]" />
-          Create User
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={handleExportCSV}
+            className="px-3.5 py-2 rounded-xl border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+            title="Export CSV"
+          >
+            <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+            Export CSV
+          </button>
+          <button
+            onClick={handleDownloadPDF}
+            className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
+            title="Download PDF"
+          >
+            <Download className="w-4 h-4" />
+            Save PDF
+          </button>
+          <button
+            onClick={handlePrint}
+            className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+            title="Print List"
+          >
+            <Printer className="w-4 h-4" />
+            Print
+          </button>
+          <button
+            onClick={handleOpenAdd}
+            className="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-semibold rounded-xl flex items-center gap-1.5 shadow-md shadow-blue-500/20 active:scale-98 transition-all cursor-pointer"
+          >
+            <Plus className="w-4 h-4 stroke-[3]" />
+            Create User
+          </button>
+        </div>
       </div>
 
-      {/* Search */}
-      <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex items-center gap-3">
-        <div className="relative flex-1 max-w-md">
+      {/* Search and Role Filter Bar */}
+      <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3">
+        <div className="relative flex-1 w-full sm:max-w-md">
           <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
           <input
             type="text"
-            placeholder="Search users by name, email..."
+            placeholder="Search users by name, email, phone..."
             value={search}
             onChange={e => setSearch(e.target.value)}
             className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-hidden focus:border-blue-500"
+          />
+        </div>
+
+        <div className="w-full sm:w-56">
+          <SearchableSelect
+            options={roleFilterOptions}
+            value={roleFilter}
+            onChange={setRoleFilter}
+            placeholder="Filter by Role..."
+            searchPlaceholder="Type role..."
           />
         </div>
       </div>
@@ -211,12 +355,12 @@ export const UsersPage: React.FC = () => {
                   </td>
                 </tr>
               ) : (
-                filteredUsers.map(u => {
+                filteredUsers.map((u, idx) => {
                   const isCurrent = u.id === currentUser?.id;
                   const isAdminRole = u.role === 'admin';
 
                   return (
-                    <tr key={u.id} className="hover:bg-slate-50/70 transition-colors">
+                    <tr key={`${u.id}-${idx}`} className="hover:bg-slate-50/70 transition-colors">
                       <td className="px-5 py-3.5">
                         <div className="flex items-center gap-3">
                           <img
@@ -359,42 +503,42 @@ export const UsersPage: React.FC = () => {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">Role *</label>
-                  <select
+                  <SearchableSelect
+                    options={roleModalOptions}
                     value={role}
-                    onChange={e => setRole(e.target.value as UserRole)}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:border-blue-500 focus:outline-hidden"
-                  >
-                    <option value="staff">Staff (Sales/POS)</option>
-                    <option value="admin">Administrator (Full Access)</option>
-                  </select>
+                    onChange={v => setRole(v as UserRole)}
+                    placeholder="Select Role..."
+                    searchPlaceholder="Type role..."
+                  />
                 </div>
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">Status</label>
-                  <select
+                  <SearchableSelect
+                    options={statusModalOptions}
                     value={status}
-                    onChange={e => setStatus(e.target.value as any)}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:border-blue-500 focus:outline-hidden"
-                  >
-                    <option value="active">Active</option>
-                    <option value="inactive">Inactive</option>
-                  </select>
+                    onChange={v => setStatus(v as any)}
+                    placeholder="Select Status..."
+                    searchPlaceholder="Type status..."
+                  />
                 </div>
               </div>
 
-              {!editingUser && (
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Password *</label>
-                  <input
-                    type="password"
-                    required
-                    value={password}
-                    onChange={e => setPassword(e.target.value)}
-                    placeholder="••••••••"
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:border-blue-500 focus:outline-hidden"
-                  />
-                  <span className="text-[10px] text-slate-400 mt-0.5 block">Minimum 6 characters</span>
-                </div>
-              )}
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  {editingUser ? 'New Password (Leave blank to keep unchanged)' : 'Login Password *'}
+                </label>
+                <input
+                  type="password"
+                  required={!editingUser}
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  placeholder={editingUser ? 'Leave blank to keep current password' : '••••••••'}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:border-blue-500 focus:outline-hidden"
+                />
+                <span className="text-[10px] text-slate-400 mt-0.5 block">
+                  {editingUser ? 'Enter at least 4 characters to change password' : 'Minimum 4 characters'}
+                </span>
+              </div>
 
               <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
                 <button

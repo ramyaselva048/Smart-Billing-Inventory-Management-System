@@ -6,18 +6,11 @@ import { Navbar } from './components/layout/Navbar';
 import { DashboardPage } from './pages/DashboardPage';
 import { BillingPage } from './pages/BillingPage';
 import { InvoicesPage } from './pages/InvoicesPage';
-import { ProductsPage } from './pages/ProductsPage';
-import { CategoriesPage } from './pages/CategoriesPage';
-import { CustomersPage } from './pages/CustomersPage';
-import { InventoryPage } from './pages/InventoryPage';
-import { PaymentsPage } from './pages/PaymentsPage';
 import { ReportsPage } from './pages/ReportsPage';
-import { NotificationsPage } from './pages/NotificationsPage';
 import { UsersPage } from './pages/UsersPage';
 import { SettingsPage } from './pages/SettingsPage';
-import { AuditLogsPage } from './pages/AuditLogsPage';
 import { InvoiceModal } from './components/invoice/InvoiceModal';
-import { Invoice, Product, BusinessSettings, Notification } from './types';
+import { Invoice, BusinessSettings } from './types';
 import { api } from './services/api';
 
 const AppShell: React.FC = () => {
@@ -29,13 +22,8 @@ const AppShell: React.FC = () => {
 
   // Global Invoice Preview Modal
   const [previewInvoice, setPreviewInvoice] = useState<Invoice | null>(null);
+  const [autoPrintInvoice, setAutoPrintInvoice] = useState<boolean>(false);
   const [settings, setSettings] = useState<BusinessSettings | null>(null);
-
-  // Notifications
-  const [notifications, setNotifications] = useState<Notification[]>([]);
-
-  // Restock link state for Inventory page
-  const [pendingRestockProduct, setPendingRestockProduct] = useState<Product | null>(null);
 
   useEffect(() => {
     if (user) {
@@ -45,20 +33,11 @@ const AppShell: React.FC = () => {
 
   const loadInitialAppData = async () => {
     try {
-      const [st, notifs] = await Promise.all([
-        api.settings.get(),
-        api.notifications.getAll(),
-      ]);
+      const st = await api.settings.get();
       setSettings(st);
-      setNotifications(notifs);
     } catch (err) {
       console.error('Error loading initial app config:', err);
     }
-  };
-
-  const handleRefreshNotifications = async () => {
-    const notifs = await api.notifications.getAll();
-    setNotifications(notifs);
   };
 
   const handleNavigateTab = (tab: TabType, params?: { search?: string }) => {
@@ -71,7 +50,7 @@ const AppShell: React.FC = () => {
       <div className="min-h-screen bg-slate-900 flex items-center justify-center">
         <div className="flex flex-col items-center gap-3">
           <div className="w-10 h-10 border-3 border-blue-500 border-t-transparent rounded-full animate-spin" />
-          <p className="text-slate-400 text-xs font-medium">Starting SMART BILL Enterprise...</p>
+          <p className="text-slate-400 text-xs font-medium">Starting SMART BILL...</p>
         </div>
       </div>
     );
@@ -81,20 +60,13 @@ const AppShell: React.FC = () => {
     return <LoginPage />;
   }
 
-  const unreadNotifsCount = notifications.filter(n => !n.read).length;
-
   const handleOpenNewBill = () => {
     setCurrentTab('billing');
   };
 
-  const handleInvoiceCreated = (newInv: Invoice) => {
+  const handleInvoiceCreated = (newInv: Invoice, autoPrint: boolean = false) => {
     setPreviewInvoice(newInv);
-    handleRefreshNotifications();
-  };
-
-  const handleOpenRestock = (product: Product) => {
-    setPendingRestockProduct(product);
-    setCurrentTab('inventory');
+    setAutoPrintInvoice(autoPrint);
   };
 
   return (
@@ -119,7 +91,6 @@ const AppShell: React.FC = () => {
             setCurrentTab(tab);
             setIsMobileSidebarOpen(false);
           }}
-          unreadNotifsCount={unreadNotifsCount}
           isCollapsed={isSidebarCollapsed}
           onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
         />
@@ -130,10 +101,8 @@ const AppShell: React.FC = () => {
         {/* Top Navbar */}
         <Navbar
           onOpenNewBill={handleOpenNewBill}
-          onNavigateTab={tab => setCurrentTab(tab)}
+          onNavigateTab={handleNavigateTab}
           onSelectInvoice={inv => setPreviewInvoice(inv)}
-          notifications={notifications}
-          onRefreshNotifications={handleRefreshNotifications}
           onToggleMobileMenu={() => setIsMobileSidebarOpen(!isMobileSidebarOpen)}
         />
 
@@ -141,17 +110,16 @@ const AppShell: React.FC = () => {
         <main className="flex-1 overflow-y-auto">
           {currentTab === 'dashboard' && (
             <DashboardPage
-              onNavigateTab={tab => setCurrentTab(tab)}
+              onNavigateTab={handleNavigateTab}
               onOpenNewBill={handleOpenNewBill}
               onSelectInvoice={inv => setPreviewInvoice(inv)}
-              onOpenRestockModal={handleOpenRestock}
             />
           )}
 
           {currentTab === 'billing' && (
             <BillingPage
               onInvoiceCreated={handleInvoiceCreated}
-              onNavigateTab={tab => setCurrentTab(tab)}
+              onNavigateTab={handleNavigateTab}
             />
           )}
 
@@ -159,55 +127,51 @@ const AppShell: React.FC = () => {
             <InvoicesPage
               onSelectInvoice={inv => setPreviewInvoice(inv)}
               onOpenNewBill={handleOpenNewBill}
+              initialSearch={tabSearchQuery}
             />
           )}
-
-          {currentTab === 'products' && (
-            <ProductsPage onOpenRestockModal={handleOpenRestock} />
-          )}
-
-          {currentTab === 'categories' && <CategoriesPage />}
-
-          {currentTab === 'customers' && (
-            <CustomersPage
-              onSelectInvoice={inv => setPreviewInvoice(inv)}
-              onOpenNewBill={handleOpenNewBill}
-            />
-          )}
-
-          {currentTab === 'inventory' && (
-            <InventoryPage
-              initialRestockProduct={pendingRestockProduct}
-              onClearInitialRestock={() => setPendingRestockProduct(null)}
-            />
-          )}
-
-          {currentTab === 'payments' && <PaymentsPage />}
 
           {currentTab === 'reports' && <ReportsPage />}
 
-          {currentTab === 'notifications' && (
-            <NotificationsPage
-              notifications={notifications}
-              onRefreshNotifications={handleRefreshNotifications}
-              onNavigateTab={tab => setCurrentTab(tab)}
-            />
-          )}
+          {currentTab === 'users' &&
+            (isAdmin ? (
+              <UsersPage initialSearch={tabSearchQuery} />
+            ) : (
+              <DashboardPage
+                onNavigateTab={handleNavigateTab}
+                onOpenNewBill={handleOpenNewBill}
+                onSelectInvoice={setPreviewInvoice}
+              />
+            ))}
 
-          {currentTab === 'users' && (isAdmin ? <UsersPage /> : <DashboardPage onNavigateTab={setCurrentTab} onOpenNewBill={handleOpenNewBill} onSelectInvoice={setPreviewInvoice} onOpenRestockModal={handleOpenRestock} />)}
-
-          {currentTab === 'settings' && (isAdmin ? <SettingsPage /> : <DashboardPage onNavigateTab={setCurrentTab} onOpenNewBill={handleOpenNewBill} onSelectInvoice={setPreviewInvoice} onOpenRestockModal={handleOpenRestock} />)}
-
-          {currentTab === 'audit' && (isAdmin ? <AuditLogsPage /> : <DashboardPage onNavigateTab={setCurrentTab} onOpenNewBill={handleOpenNewBill} onSelectInvoice={setPreviewInvoice} onOpenRestockModal={handleOpenRestock} />)}
+          {currentTab === 'settings' &&
+            (isAdmin ? (
+              <SettingsPage />
+            ) : (
+              <DashboardPage
+                onNavigateTab={handleNavigateTab}
+                onOpenNewBill={handleOpenNewBill}
+                onSelectInvoice={setPreviewInvoice}
+              />
+            ))}
         </main>
       </div>
 
-      {/* Global Invoice Preview Modal */}
+      {/* Global Invoice Details & Printable Receipt Modal */}
       {previewInvoice && settings && (
         <InvoiceModal
           invoice={previewInvoice}
           settings={settings}
-          onClose={() => setPreviewInvoice(null)}
+          autoPrint={autoPrintInvoice}
+          onClose={() => {
+            setPreviewInvoice(null);
+            setAutoPrintInvoice(false);
+          }}
+          onCreateNewBill={() => {
+            setPreviewInvoice(null);
+            setAutoPrintInvoice(false);
+            setCurrentTab('billing');
+          }}
         />
       )}
     </div>
